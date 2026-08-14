@@ -2,13 +2,22 @@ import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
 
+
+# =========================================================
+# PAGE CONFIGURATION
+# =========================================================
+
 st.set_page_config(
     page_title="Manufacturing Production Monitor",
     page_icon="🏭",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="collapsed"
 )
 
-st.title("🏭 Manufacturing Production Monitor")
+
+# =========================================================
+# GOOGLE SHEETS CONNECTION
+# =========================================================
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -29,27 +38,375 @@ def connect_google_sheets():
     return client
 
 
-try:
+@st.cache_resource
+def get_spreadsheet():
 
     client = connect_google_sheets()
 
-    spreadsheet = client.open("Manufacturing Production DB")
+    return client.open("Manufacturing Production DB")
 
-    st.success("✅ Google Sheets connection successful!")
 
-    st.write("Connected spreadsheet:")
+# =========================================================
+# READ DATA FROM GOOGLE SHEET
+# =========================================================
 
-    st.info(spreadsheet.title)
+@st.cache_data(ttl=30)
+def get_records(sheet_name):
 
-    worksheets = spreadsheet.worksheets()
+    spreadsheet = get_spreadsheet()
 
-    st.write("Available sheets:")
+    worksheet = spreadsheet.worksheet(sheet_name)
 
-    for sheet in worksheets:
-        st.write(f"• {sheet.title}")
+    return worksheet.get_all_records()
 
-except Exception as e:
 
-    st.error("❌ Google Sheets connection failed.")
+# =========================================================
+# SESSION STATE
+# =========================================================
 
-    st.exception(e)
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+if "operator_id" not in st.session_state:
+    st.session_state.operator_id = None
+
+if "operator_name" not in st.session_state:
+    st.session_state.operator_name = None
+
+if "machine_selected" not in st.session_state:
+    st.session_state.machine_selected = False
+
+if "machine_id" not in st.session_state:
+    st.session_state.machine_id = None
+
+if "machine_name" not in st.session_state:
+    st.session_state.machine_name = None
+
+
+# =========================================================
+# LOGOUT FUNCTION
+# =========================================================
+
+def logout():
+
+    st.session_state.logged_in = False
+    st.session_state.operator_id = None
+    st.session_state.operator_name = None
+
+    st.session_state.machine_selected = False
+    st.session_state.machine_id = None
+    st.session_state.machine_name = None
+
+    st.rerun()
+
+
+# =========================================================
+# LOGIN SCREEN
+# =========================================================
+
+def login_screen():
+
+    st.title("🏭 Manufacturing Production Monitor")
+
+    st.markdown("### Operator Login")
+
+    st.write("")
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+
+    with col2:
+
+        operator_id = st.text_input(
+            "Operator ID",
+            placeholder="Enter your Operator ID",
+            key="login_operator_id"
+        )
+
+        password = st.text_input(
+            "Password",
+            type="password",
+            placeholder="Enter your code",
+            key="login_password"
+        )
+
+        st.write("")
+
+        login_button = st.button(
+            "LOGIN",
+            type="primary",
+            use_container_width=True
+        )
+
+        if login_button:
+
+            operator_id = operator_id.strip()
+
+            password = password.strip()
+
+            if not operator_id or not password:
+
+                st.warning(
+                    "Please enter Operator ID and Password."
+                )
+
+                return
+
+            try:
+
+                operators = get_records("Operators")
+
+                operator_found = None
+
+                for operator in operators:
+
+                    sheet_operator_id = str(
+                        operator.get("OperatorID", "")
+                    ).strip()
+
+                    sheet_operator_name = str(
+                        operator.get("OperatorName", "")
+                    ).strip()
+
+                    active = str(
+                        operator.get("Active", "")
+                    ).strip().upper()
+
+                    # -------------------------------------------------
+                    # LOGIN:
+                    # OperatorID = Username
+                    # OperatorID = Temporary Password
+                    # -------------------------------------------------
+
+                    if (
+                        sheet_operator_id == operator_id
+                        and password == sheet_operator_id
+                        and active == "TRUE"
+                    ):
+
+                        operator_found = {
+                            "OperatorID": sheet_operator_id,
+                            "OperatorName": sheet_operator_name
+                        }
+
+                        break
+
+                if operator_found:
+
+                    st.session_state.logged_in = True
+
+                    st.session_state.operator_id = (
+                        operator_found["OperatorID"]
+                    )
+
+                    st.session_state.operator_name = (
+                        operator_found["OperatorName"]
+                    )
+
+                    st.rerun()
+
+                else:
+
+                    st.error(
+                        "Invalid Operator ID or Password."
+                    )
+
+            except Exception as e:
+
+                st.error(
+                    "Unable to read operator data from Google Sheets."
+                )
+
+                st.exception(e)
+
+
+# =========================================================
+# MACHINE SELECTION
+# =========================================================
+
+def machine_selection():
+
+    st.title("🏭 Manufacturing Production Monitor")
+
+    # -----------------------------------------------------
+    # Operator information
+    # -----------------------------------------------------
+
+    col1, col2 = st.columns([3, 1])
+
+    with col1:
+
+        st.success(
+            f"Welcome, {st.session_state.operator_name}"
+        )
+
+        st.caption(
+            f"Operator ID: {st.session_state.operator_id}"
+        )
+
+    with col2:
+
+        if st.button(
+            "LOGOUT",
+            use_container_width=True
+        ):
+
+            logout()
+
+    st.divider()
+
+    # -----------------------------------------------------
+    # Machine selection
+    # -----------------------------------------------------
+
+    st.subheader("Select Machine")
+
+    try:
+
+        machines = get_records("Machines")
+
+        active_machines = []
+
+        for machine in machines:
+
+            active = str(
+                machine.get("Active", "")
+            ).strip().upper()
+
+            if active == "TRUE":
+
+                active_machines.append(machine)
+
+        if not active_machines:
+
+            st.warning(
+                "No active machines found in the Machines sheet."
+            )
+
+            return
+
+        machine_options = {}
+
+        for machine in active_machines:
+
+            machine_id = str(
+                machine.get("MachineID", "")
+            ).strip()
+
+            machine_name = str(
+                machine.get("MachineName", "")
+            ).strip()
+
+            if machine_id and machine_name:
+
+                machine_options[machine_name] = machine_id
+
+        if not machine_options:
+
+            st.warning(
+                "Machine master data is incomplete."
+            )
+
+            return
+
+        selected_machine_name = st.selectbox(
+            "Machine",
+            options=list(machine_options.keys()),
+            key="selected_machine"
+        )
+
+        selected_machine_id = machine_options[
+            selected_machine_name
+        ]
+
+        st.write("")
+
+        if st.button(
+            "START MACHINE SESSION",
+            type="primary",
+            use_container_width=True
+        ):
+
+            st.session_state.machine_id = (
+                selected_machine_id
+            )
+
+            st.session_state.machine_name = (
+                selected_machine_name
+            )
+
+            st.session_state.machine_selected = True
+
+            st.rerun()
+
+    except Exception as e:
+
+        st.error(
+            "Unable to read machine data from Google Sheets."
+        )
+
+        st.exception(e)
+
+
+# =========================================================
+# TEMPORARY MACHINE HOME SCREEN
+# =========================================================
+
+def machine_home():
+
+    st.title("🏭 Manufacturing Production Monitor")
+
+    col1, col2 = st.columns([3, 1])
+
+    with col1:
+
+        st.success(
+            f"Operator: {st.session_state.operator_name}"
+        )
+
+        st.info(
+            f"Machine: {st.session_state.machine_name}"
+        )
+
+    with col2:
+
+        if st.button(
+            "LOGOUT",
+            use_container_width=True
+        ):
+
+            logout()
+
+    st.divider()
+
+    st.subheader("Machine Session")
+
+    st.write(
+        "Machine session functionality will be added next."
+    )
+
+    st.write(
+        f"Operator ID: **{st.session_state.operator_id}**"
+    )
+
+    st.write(
+        f"Machine ID: **{st.session_state.machine_id}**"
+    )
+
+
+# =========================================================
+# APPLICATION
+# =========================================================
+
+if not st.session_state.logged_in:
+
+    login_screen()
+
+else:
+
+    if not st.session_state.machine_selected:
+
+        machine_selection()
+
+    else:
+
+        machine_home()
