@@ -731,38 +731,20 @@ def login_screen():
 
 def machine_selection():
 
-    st.title(
-        "🏭 Manufacturing Production Monitor"
+    st.title("🏭 Machine Status")
+
+    # -----------------------------------------------------
+    # OPERATOR HEADER
+    # -----------------------------------------------------
+
+    st.success(
+        f"👤 {st.session_state.operator_name} "
+        f"({st.session_state.operator_id})"
     )
-
-    col1, col2 = st.columns([3, 1])
-
-    with col1:
-
-        st.success(
-            f"Welcome, "
-            f"{st.session_state.operator_name}"
-        )
-
-        st.caption(
-            f"Operator ID: "
-            f"{st.session_state.operator_id}"
-        )
-
-    with col2:
-
-        if st.button(
-            "LOGOUT",
-            use_container_width=True
-        ):
-
-            logout()
 
     st.divider()
 
-    st.subheader(
-        "Select Machine"
-    )
+    st.subheader("Machine Status")
 
     try:
 
@@ -803,95 +785,227 @@ def machine_selection():
 
             return
 
-        machine_options = {}
+        # -------------------------------------------------
+        # MACHINE CARDS
+        # -------------------------------------------------
 
         for machine in active_machines:
 
-            display_name = (
-                f"{machine['MachineID']} - "
-                f"{machine['MachineName']}"
+            machine_id = machine["MachineID"]
+
+            machine_name = machine["MachineName"]
+
+            active_session = get_active_machine_session(
+                machine_id
             )
 
-            machine_options[
-                display_name
-            ] = machine
-
-        selected_machine_display = st.selectbox(
-            "Machine",
-            options=list(
-                machine_options.keys()
-            ),
-            index=None,
-            placeholder="Select machine"
-        )
-
-        st.write("")
-
-        if st.button(
-            "CONTINUE",
-            type="primary",
-            use_container_width=True
-        ):
-
-            if not selected_machine_display:
-
-                st.warning(
-                    "Please select a machine."
-                )
-
-                return
-
-            selected_machine = (
-                machine_options[
-                    selected_machine_display
-                ]
-            )
-
-            st.session_state.machine_id = (
-                selected_machine["MachineID"]
-            )
-
-            st.session_state.machine_name = (
-                selected_machine["MachineName"]
-            )
-
-            # Check the machine
-            # before creating a session.
-
-            active_session = (
-                get_active_machine_session(
-                    st.session_state.machine_id
-                )
-            )
+            # =============================================
+            # MACHINE AVAILABLE
+            # =============================================
 
             if active_session is None:
 
-                create_machine_session()
+                st.markdown(
+                    f"""
+                    <div class="machine-card available">
+                        <div class="machine-title">
+                            {machine_id} - {machine_name}
+                        </div>
 
-                st.session_state.machine_selected = True
+                        <div class="machine-status available-text">
+                            🟢 AVAILABLE
+                        </div>
 
-                st.rerun()
+                        <div class="machine-info">
+                            No operator currently assigned
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
+                if st.button(
+                    "SELECT MACHINE",
+                    key=f"select_{machine_id}",
+                    type="primary",
+                    use_container_width=True
+                ):
+
+                    st.session_state.machine_id = machine_id
+
+                    st.session_state.machine_name = machine_name
+
+                    create_machine_session()
+
+                    st.session_state.machine_selected = True
+
+                    st.rerun()
+
+            # =============================================
+            # MACHINE OCCUPIED
+            # =============================================
 
             else:
 
-                st.session_state.machine_selected = True
+                current_operator = str(
+                    active_session.get(
+                        "OperatorName",
+                        "Unknown"
+                    )
+                ).strip()
 
-                st.session_state.occupied_session = (
-                    active_session
+                current_operator_id = str(
+                    active_session.get(
+                        "OperatorID",
+                        ""
+                    )
+                ).strip()
+
+                login_time = str(
+                    active_session.get(
+                        "LoginTime",
+                        ""
+                    )
+                ).strip()
+
+                # -------------------------------------------------
+                # Check if THIS operator owns the machine
+                # -------------------------------------------------
+
+                is_my_machine = (
+                    current_operator_id
+                    == str(
+                        st.session_state.operator_id
+                    )
                 )
 
-                st.session_state.show_takeover = True
+                if is_my_machine:
 
-                st.rerun()
+                    st.markdown(
+                        f"""
+                        <div class="machine-card my-machine">
+                            <div class="machine-title">
+                                {machine_id} - {machine_name}
+                            </div>
+
+                            <div class="machine-status my-text">
+                                🟢 YOUR MACHINE
+                            </div>
+
+                            <div class="machine-info">
+                                Operator: 
+                                <b>{current_operator}</b>
+                            </div>
+
+                            <div class="machine-info">
+                                Started: 
+                                <b>{login_time}</b>
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+
+                    if st.button(
+                        "OPEN MACHINE",
+                        key=f"open_{machine_id}",
+                        type="primary",
+                        use_container_width=True
+                    ):
+
+                        st.session_state.machine_id = (
+                            machine_id
+                        )
+
+                        st.session_state.machine_name = (
+                            machine_name
+                        )
+
+                        st.session_state.session_id = (
+                            active_session.get(
+                                "SessionID"
+                            )
+                        )
+
+                        st.session_state.current_shift = (
+                            active_session.get(
+                                "ShiftID"
+                            )
+                        )
+
+                        st.session_state.shift_date = (
+                            active_session.get(
+                                "Date"
+                            )
+                        )
+
+                        st.session_state.machine_session_active = True
+
+                        st.session_state.machine_selected = True
+
+                        st.rerun()
+
+                # -------------------------------------------------
+                # MACHINE BELONGS TO ANOTHER OPERATOR
+                # -------------------------------------------------
+
+                else:
+
+                    st.markdown(
+                        f"""
+                        <div class="machine-card occupied">
+                            <div class="machine-title">
+                                {machine_id} - {machine_name}
+                            </div>
+
+                            <div class="machine-status occupied-text">
+                                🔴 RUNNING
+                            </div>
+
+                            <div class="machine-info">
+                                Operator:
+                                <b>{current_operator}</b>
+                                ({current_operator_id})
+                            </div>
+
+                            <div class="machine-info">
+                                Started:
+                                <b>{login_time}</b>
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+
+                    if st.button(
+                        "TAKE OVER MACHINE",
+                        key=f"takeover_{machine_id}",
+                        use_container_width=True
+                    ):
+
+                        st.session_state.machine_id = machine_id
+
+                        st.session_state.machine_name = machine_name
+
+                        st.session_state.occupied_session = (
+                            active_session
+                        )
+
+                        st.session_state.machine_selected = True
+
+                        st.session_state.show_takeover = True
+
+                        st.rerun()
+
+            st.write("")
 
     except Exception as e:
 
         st.error(
-            "Unable to load machines."
+            "Unable to load machine status."
         )
 
         st.exception(e)
-
 
 # =========================================================
 # MACHINE HOME
