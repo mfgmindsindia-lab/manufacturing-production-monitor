@@ -47,7 +47,7 @@ def get_spreadsheet():
 
 
 # =========================================================
-# READ GOOGLE SHEET
+# READ GOOGLE SHEET DATA
 # =========================================================
 
 @st.cache_data(ttl=30)
@@ -90,10 +90,12 @@ if "machine_name" not in st.session_state:
 def logout():
 
     st.session_state.logged_in = False
+
     st.session_state.operator_id = None
     st.session_state.operator_name = None
 
     st.session_state.machine_selected = False
+
     st.session_state.machine_id = None
     st.session_state.machine_name = None
 
@@ -116,9 +118,9 @@ def login_screen():
 
         operators = get_records("Operators")
 
-        # -----------------------------------------------------
-        # Get active operators
-        # -----------------------------------------------------
+        # -------------------------------------------------
+        # ACTIVE OPERATORS
+        # -------------------------------------------------
 
         active_operators = []
 
@@ -155,9 +157,9 @@ def login_screen():
 
             return
 
-        # -----------------------------------------------------
-        # Create display names
-        # -----------------------------------------------------
+        # -------------------------------------------------
+        # CREATE DROPDOWN OPTIONS
+        # -------------------------------------------------
 
         operator_options = {}
 
@@ -169,6 +171,10 @@ def login_screen():
             )
 
             operator_options[display_name] = operator
+
+        # -------------------------------------------------
+        # LOGIN FORM
+        # -------------------------------------------------
 
         col1, col2, col3 = st.columns([1, 2, 1])
 
@@ -213,16 +219,12 @@ def login_screen():
 
                     return
 
-                # -------------------------------------------------
-                # Get selected operator
-                # -------------------------------------------------
-
                 selected_operator = operator_options[
                     selected_display
                 ]
 
                 # -------------------------------------------------
-                # Validate operator code
+                # VERIFY CODE
                 # -------------------------------------------------
 
                 if (
@@ -255,6 +257,147 @@ def login_screen():
         )
 
         st.exception(e)
+
+
+# =========================================================
+# MACHINE SELECTION
+# =========================================================
+
+def machine_selection():
+
+    st.title("🏭 Manufacturing Production Monitor")
+
+    # -----------------------------------------------------
+    # OPERATOR INFORMATION
+    # -----------------------------------------------------
+
+    col1, col2 = st.columns([3, 1])
+
+    with col1:
+
+        st.success(
+            f"Welcome, {st.session_state.operator_name}"
+        )
+
+        st.caption(
+            f"Operator ID: {st.session_state.operator_id}"
+        )
+
+    with col2:
+
+        if st.button(
+            "LOGOUT",
+            use_container_width=True
+        ):
+
+            logout()
+
+    st.divider()
+
+    # -----------------------------------------------------
+    # MACHINE SELECTION
+    # -----------------------------------------------------
+
+    st.subheader("Select Machine")
+
+    try:
+
+        machines = get_records("Machines")
+
+        active_machines = []
+
+        for machine in machines:
+
+            machine_id = str(
+                machine.get("MachineID", "")
+            ).strip()
+
+            machine_name = str(
+                machine.get("MachineName", "")
+            ).strip()
+
+            active = str(
+                machine.get("Active", "")
+            ).strip().upper()
+
+            if (
+                machine_id
+                and machine_name
+                and active == "TRUE"
+            ):
+
+                active_machines.append({
+                    "MachineID": machine_id,
+                    "MachineName": machine_name
+                })
+
+        if not active_machines:
+
+            st.warning(
+                "No active machines found in the Machines sheet."
+            )
+
+            return
+
+        machine_options = {}
+
+        for machine in active_machines:
+
+            display_name = (
+                f"{machine['MachineID']} - "
+                f"{machine['MachineName']}"
+            )
+
+            machine_options[display_name] = machine
+
+        selected_machine_display = st.selectbox(
+            "Machine",
+            options=list(machine_options.keys()),
+            index=None,
+            placeholder="Select machine"
+        )
+
+        st.write("")
+
+        if st.button(
+            "START MACHINE SESSION",
+            type="primary",
+            use_container_width=True
+        ):
+
+            if not selected_machine_display:
+
+                st.warning(
+                    "Please select a machine."
+                )
+
+                return
+
+            selected_machine = machine_options[
+                selected_machine_display
+            ]
+
+            st.session_state.machine_id = (
+                selected_machine["MachineID"]
+            )
+
+            st.session_state.machine_name = (
+                selected_machine["MachineName"]
+            )
+
+            st.session_state.machine_selected = True
+
+            st.rerun()
+
+    except Exception as e:
+
+        st.error(
+            "Unable to load machines from Google Sheets."
+        )
+
+        st.exception(e)
+
+
 # =========================================================
 # MACHINE HOME
 # =========================================================
@@ -262,6 +405,10 @@ def login_screen():
 def machine_home():
 
     st.title("🏭 Manufacturing Production Monitor")
+
+    # -----------------------------------------------------
+    # HEADER
+    # -----------------------------------------------------
 
     col1, col2 = st.columns([3, 1])
 
@@ -286,19 +433,31 @@ def machine_home():
 
     st.divider()
 
+    # -----------------------------------------------------
+    # TEMPORARY SCREEN
+    # -----------------------------------------------------
+
     st.subheader("Machine Session")
 
     st.write(
         "Machine session functionality will be added next."
     )
 
-    st.write(
-        f"Operator Code: **{st.session_state.operator_id}**"
-    )
+    col1, col2 = st.columns(2)
 
-    st.write(
-        f"Machine ID: **{st.session_state.machine_id}**"
-    )
+    with col1:
+
+        st.metric(
+            "Operator ID",
+            st.session_state.operator_id
+        )
+
+    with col2:
+
+        st.metric(
+            "Machine ID",
+            st.session_state.machine_id
+        )
 
 
 # =========================================================
