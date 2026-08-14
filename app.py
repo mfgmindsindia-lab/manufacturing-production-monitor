@@ -47,7 +47,7 @@ def get_spreadsheet():
 
 
 # =========================================================
-# READ DATA FROM GOOGLE SHEET
+# READ GOOGLE SHEET
 # =========================================================
 
 @st.cache_data(ttl=30)
@@ -84,7 +84,7 @@ if "machine_name" not in st.session_state:
 
 
 # =========================================================
-# LOGOUT FUNCTION
+# LOGOUT
 # =========================================================
 
 def logout():
@@ -116,17 +116,17 @@ def login_screen():
 
     with col2:
 
-        operator_id = st.text_input(
-            "Operator ID",
-            placeholder="Enter your Operator ID",
-            key="login_operator_id"
+        operator_name = st.text_input(
+            "Operator Name",
+            placeholder="Enter your name",
+            key="login_operator_name"
         )
 
-        password = st.text_input(
-            "Password",
+        operator_code = st.text_input(
+            "Operator Code",
             type="password",
-            placeholder="Enter your code",
-            key="login_password"
+            placeholder="Enter your operator code",
+            key="login_operator_code"
         )
 
         st.write("")
@@ -139,14 +139,13 @@ def login_screen():
 
         if login_button:
 
-            operator_id = operator_id.strip()
+            operator_name_input = operator_name.strip().lower()
+            operator_code_input = operator_code.strip()
 
-            password = password.strip()
-
-            if not operator_id or not password:
+            if not operator_name_input or not operator_code_input:
 
                 st.warning(
-                    "Please enter Operator ID and Password."
+                    "Please enter Operator Name and Operator Code."
                 )
 
                 return
@@ -171,16 +170,19 @@ def login_screen():
                         operator.get("Active", "")
                     ).strip().upper()
 
-                    # -------------------------------------------------
-                    # LOGIN:
-                    # OperatorID = Username
-                    # OperatorID = Temporary Password
-                    # -------------------------------------------------
+                    # ---------------------------------------------
+                    # LOGIN VALIDATION
+                    # Name + Operator Code + Active
+                    # ---------------------------------------------
 
                     if (
-                        sheet_operator_id == operator_id
-                        and password == sheet_operator_id
-                        and active == "TRUE"
+                        sheet_operator_name.lower()
+                        == operator_name_input
+                        and
+                        sheet_operator_id
+                        == operator_code_input
+                        and
+                        active == "TRUE"
                     ):
 
                         operator_found = {
@@ -207,7 +209,7 @@ def login_screen():
                 else:
 
                     st.error(
-                        "Invalid Operator ID or Password."
+                        "Invalid Operator Name or Operator Code."
                     )
 
             except Exception as e:
@@ -227,10 +229,6 @@ def machine_selection():
 
     st.title("🏭 Manufacturing Production Monitor")
 
-    # -----------------------------------------------------
-    # Operator information
-    # -----------------------------------------------------
-
     col1, col2 = st.columns([3, 1])
 
     with col1:
@@ -240,7 +238,7 @@ def machine_selection():
         )
 
         st.caption(
-            f"Operator ID: {st.session_state.operator_id}"
+            f"Operator Code: {st.session_state.operator_id}"
         )
 
     with col2:
@@ -253,10 +251,6 @@ def machine_selection():
             logout()
 
     st.divider()
-
-    # -----------------------------------------------------
-    # Machine selection
-    # -----------------------------------------------------
 
     st.subheader("Select Machine")
 
@@ -279,7 +273,7 @@ def machine_selection():
         if not active_machines:
 
             st.warning(
-                "No active machines found in the Machines sheet."
+                "No active machines found."
             )
 
             return
@@ -310,8 +304,7 @@ def machine_selection():
 
         selected_machine_name = st.selectbox(
             "Machine",
-            options=list(machine_options.keys()),
-            key="selected_machine"
+            options=list(machine_options.keys())
         )
 
         selected_machine_id = machine_options[
@@ -326,13 +319,9 @@ def machine_selection():
             use_container_width=True
         ):
 
-            st.session_state.machine_id = (
-                selected_machine_id
-            )
+            st.session_state.machine_id = selected_machine_id
 
-            st.session_state.machine_name = (
-                selected_machine_name
-            )
+            st.session_state.machine_name = selected_machine_name
 
             st.session_state.machine_selected = True
 
@@ -348,7 +337,7 @@ def machine_selection():
 
 
 # =========================================================
-# TEMPORARY MACHINE HOME SCREEN
+# MACHINE HOME
 # =========================================================
 
 def machine_home():
@@ -385,7 +374,7 @@ def machine_home():
     )
 
     st.write(
-        f"Operator ID: **{st.session_state.operator_id}**"
+        f"Operator Code: **{st.session_state.operator_id}**"
     )
 
     st.write(
@@ -394,7 +383,7 @@ def machine_home():
 
 
 # =========================================================
-# APPLICATION
+# MAIN APPLICATION
 # =========================================================
 
 if not st.session_state.logged_in:
