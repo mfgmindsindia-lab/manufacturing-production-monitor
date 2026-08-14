@@ -819,10 +819,6 @@ def machine_selection():
 
     st.title("🏭 Machine Status")
 
-    # -----------------------------------------------------
-    # OPERATOR HEADER
-    # -----------------------------------------------------
-
     st.success(
         f"👤 {st.session_state.operator_name} "
         f"({st.session_state.operator_id})"
@@ -865,17 +861,82 @@ def machine_selection():
 
         if not active_machines:
 
-            st.warning(
-                "No active machines found."
-            )
+            st.warning("No active machines found.")
 
             return
 
-        # -------------------------------------------------
-        # MACHINE CARDS
-        # -------------------------------------------------
+        # =================================================
+        # CSS
+        # =================================================
 
-        for machine in active_machines:
+        st.markdown(
+            """
+            <style>
+
+            .machine-card {
+                padding: 18px;
+                border-radius: 16px;
+                margin-bottom: 8px;
+                min-height: 210px;
+                border: 1px solid rgba(255,255,255,0.12);
+            }
+
+            .machine-available {
+                background: rgba(0,180,80,0.08);
+                border-left: 6px solid #00b450;
+            }
+
+            .machine-running {
+                background: rgba(220,50,50,0.08);
+                border-left: 6px solid #dc3232;
+            }
+
+            .machine-mine {
+                background: rgba(40,120,255,0.10);
+                border-left: 6px solid #2878ff;
+            }
+
+            .machine-title {
+                font-size: 20px;
+                font-weight: 700;
+                margin-bottom: 14px;
+            }
+
+            .machine-status {
+                font-size: 17px;
+                font-weight: 700;
+                margin-bottom: 12px;
+            }
+
+            .machine-detail {
+                font-size: 14px;
+                margin-top: 7px;
+            }
+
+            @media (max-width: 768px) {
+
+                .machine-card {
+                    min-height: 180px;
+                }
+
+                .machine-title {
+                    font-size: 18px;
+                }
+
+            }
+
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
+
+        # =================================================
+        # CREATE 3-COLUMN GRID
+        # =================================================
+
+        columns = st.columns(3)
+
+        for index, machine in enumerate(active_machines):
 
             machine_id = machine["MachineID"]
 
@@ -885,152 +946,235 @@ def machine_selection():
                 machine_id
             )
 
-            # =============================================
-            # MACHINE AVAILABLE
-            # =============================================
+            # -------------------------------------------------
+            # Select column
+            # -------------------------------------------------
 
-            if active_session is None:
+            col = columns[index % 3]
 
-                st.markdown(
-                    f"""
-                    <div class="machine-card available">
-                        <div class="machine-title">
-                            {machine_id} - {machine_name}
-                        </div>
+            with col:
 
-                        <div class="machine-status available-text">
-                            🟢 AVAILABLE
-                        </div>
+                # =================================================
+                # MACHINE AVAILABLE
+                # =================================================
 
-                        <div class="machine-info">
-                            No operator currently assigned
-                        </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-
-                if st.button(
-                    "SELECT MACHINE",
-                    key=f"select_{machine_id}",
-                    type="primary",
-                    use_container_width=True
-                ):
-
-                    st.session_state.machine_id = machine_id
-
-                    st.session_state.machine_name = machine_name
-
-                    create_machine_session()
-
-                    st.session_state.machine_selected = True
-
-                    st.rerun()
-
-            # =============================================
-            # MACHINE OCCUPIED
-            # =============================================
-
-            else:
-
-                current_operator = str(
-                    active_session.get(
-                        "OperatorName",
-                        "Unknown"
-                    )
-                ).strip()
-
-                current_operator_id = str(
-                    active_session.get(
-                        "OperatorID",
-                        ""
-                    )
-                ).strip()
-
-                login_time = str(
-                    active_session.get(
-                        "LoginTime",
-                        ""
-                    )
-                ).strip()
-
-                # -------------------------------------------------
-                # Check if THIS operator owns the machine
-                # -------------------------------------------------
-
-                is_my_machine = (
-                    current_operator_id
-                    == str(
-                        st.session_state.operator_id
-                    )
-                )
-
-                if is_my_machine:
+                if active_session is None:
 
                     st.markdown(
                         f"""
-                        <div class="machine-card my-machine">
+                        <div class="machine-card machine-available">
+
                             <div class="machine-title">
-                                {machine_id} - {machine_name}
+                                {machine_id}
                             </div>
 
-                            <div class="machine-status my-text">
-                                🟢 YOUR MACHINE
+                            <div class="machine-detail">
+                                {machine_name}
                             </div>
 
-                            <div class="machine-info">
-                                Operator: 
-                                <b>{current_operator}</b>
+                            <br>
+
+                            <div class="machine-status">
+                                🟢 AVAILABLE
                             </div>
 
-                            <div class="machine-info">
-                                Started: 
-                                <b>{login_time}</b>
+                            <div class="machine-detail">
+                                No operator assigned
                             </div>
+
                         </div>
                         """,
                         unsafe_allow_html=True
                     )
 
                     if st.button(
-                        "OPEN MACHINE",
-                        key=f"open_{machine_id}",
+                        "SELECT MACHINE",
+                        key=f"select_{machine_id}",
                         type="primary",
                         use_container_width=True
                     ):
 
-                        st.session_state.machine_id = (
-                            machine_id
-                        )
+                        st.session_state.machine_id = machine_id
 
-                        st.session_state.machine_name = (
-                            machine_name
-                        )
+                        st.session_state.machine_name = machine_name
 
-                        st.session_state.session_id = (
-                            active_session.get(
-                                "SessionID"
-                            )
-                        )
-
-                        st.session_state.current_shift = (
-                            active_session.get(
-                                "ShiftID"
-                            )
-                        )
-
-                        st.session_state.shift_date = (
-                            active_session.get(
-                                "Date"
-                            )
-                        )
-
-                        st.session_state.machine_session_active = True
+                        create_machine_session()
 
                         st.session_state.machine_selected = True
 
                         st.rerun()
 
+                # =================================================
+                # MACHINE OCCUPIED
+                # =================================================
+
+                else:
+
+                    current_operator = str(
+                        active_session.get(
+                            "OperatorName",
+                            "Unknown"
+                        )
+                    ).strip()
+
+                    current_operator_id = str(
+                        active_session.get(
+                            "OperatorID",
+                            ""
+                        )
+                    ).strip()
+
+                    login_time = str(
+                        active_session.get(
+                            "LoginTime",
+                            ""
+                        )
+                    ).strip()
+
+                    is_my_machine = (
+                        current_operator_id
+                        == str(
+                            st.session_state.operator_id
+                        )
+                    )
+
+                    # =============================================
+                    # MY MACHINE
+                    # =============================================
+
+                    if is_my_machine:
+
+                        st.markdown(
+                            f"""
+                            <div class="machine-card machine-mine">
+
+                                <div class="machine-title">
+                                    {machine_id}
+                                </div>
+
+                                <div class="machine-detail">
+                                    {machine_name}
+                                </div>
+
+                                <br>
+
+                                <div class="machine-status">
+                                    🔵 YOUR MACHINE
+                                </div>
+
+                                <div class="machine-detail">
+                                    👤 {current_operator}
+                                </div>
+
+                                <div class="machine-detail">
+                                    🕐 Started: {login_time}
+                                </div>
+
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+
+                        if st.button(
+                            "OPEN MACHINE",
+                            key=f"open_{machine_id}",
+                            type="primary",
+                            use_container_width=True
+                        ):
+
+                            st.session_state.machine_id = machine_id
+
+                            st.session_state.machine_name = machine_name
+
+                            st.session_state.session_id = (
+                                active_session.get(
+                                    "SessionID"
+                                )
+                            )
+
+                            st.session_state.current_shift = (
+                                active_session.get(
+                                    "ShiftID"
+                                )
+                            )
+
+                            st.session_state.shift_date = (
+                                active_session.get(
+                                    "Date"
+                                )
+                            )
+
+                            st.session_state.machine_session_active = True
+
+                            st.session_state.machine_selected = True
+
+                            st.rerun()
+
+                    # =============================================
+                    # MACHINE RUNNING BY OTHER OPERATOR
+                    # =============================================
+
+                    else:
+
+                        st.markdown(
+                            f"""
+                            <div class="machine-card machine-running">
+
+                                <div class="machine-title">
+                                    {machine_id}
+                                </div>
+
+                                <div class="machine-detail">
+                                    {machine_name}
+                                </div>
+
+                                <br>
+
+                                <div class="machine-status">
+                                    🔴 RUNNING
+                                </div>
+
+                                <div class="machine-detail">
+                                    👤 {current_operator}
+                                    ({current_operator_id})
+                                </div>
+
+                                <div class="machine-detail">
+                                    🕐 Started: {login_time}
+                                </div>
+
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+
+                        if st.button(
+                            "TAKE OVER",
+                            key=f"takeover_{machine_id}",
+                            use_container_width=True
+                        ):
+
+                            st.session_state.machine_id = machine_id
+
+                            st.session_state.machine_name = machine_name
+
+                            st.session_state.occupied_session = (
+                                active_session
+                            )
+
+                            st.session_state.machine_selected = True
+
+                            st.session_state.show_takeover = True
+
+                            st.rerun()
+
+    except Exception as e:
+
+        st.error(
+            "Unable to load machine status."
+        )
+
+        st.exception(e)
                 # -------------------------------------------------
                 # MACHINE BELONGS TO ANOTHER OPERATOR
                 # -------------------------------------------------
