@@ -117,7 +117,7 @@ def login_screen():
         operators = get_records("Operators")
 
         # -----------------------------------------------------
-        # Get active operators only
+        # Get active operators
         # -----------------------------------------------------
 
         active_operators = []
@@ -156,23 +156,29 @@ def login_screen():
             return
 
         # -----------------------------------------------------
-        # Operator dropdown
+        # Create display names
         # -----------------------------------------------------
 
-        operator_names = [
-            operator["OperatorName"]
-            for operator in active_operators
-        ]
+        operator_options = {}
+
+        for operator in active_operators:
+
+            display_name = (
+                f"{operator['OperatorID']} - "
+                f"{operator['OperatorName']}"
+            )
+
+            operator_options[display_name] = operator
 
         col1, col2, col3 = st.columns([1, 2, 1])
 
         with col2:
 
-            selected_operator_name = st.selectbox(
-                "Operator Name",
-                options=operator_names,
+            selected_display = st.selectbox(
+                "Operator",
+                options=list(operator_options.keys()),
                 index=None,
-                placeholder="Select your name"
+                placeholder="Select your ID and name"
             )
 
             operator_code = st.text_input(
@@ -191,10 +197,10 @@ def login_screen():
 
             if login_button:
 
-                if not selected_operator_name:
+                if not selected_display:
 
                     st.warning(
-                        "Please select your name."
+                        "Please select your Operator ID and Name."
                     )
 
                     return
@@ -202,35 +208,24 @@ def login_screen():
                 if not operator_code.strip():
 
                     st.warning(
-                        "Please enter your operator code."
+                        "Please enter your Operator Code."
                     )
 
                     return
 
                 # -------------------------------------------------
-                # Find selected operator
+                # Get selected operator
                 # -------------------------------------------------
 
-                selected_operator = None
-
-                for operator in active_operators:
-
-                    if (
-                        operator["OperatorName"]
-                        == selected_operator_name
-                    ):
-
-                        selected_operator = operator
-
-                        break
+                selected_operator = operator_options[
+                    selected_display
+                ]
 
                 # -------------------------------------------------
-                # Verify operator code
+                # Validate operator code
                 # -------------------------------------------------
 
                 if (
-                    selected_operator
-                    and
                     operator_code.strip()
                     == selected_operator["OperatorID"]
                 ):
@@ -260,122 +255,6 @@ def login_screen():
         )
 
         st.exception(e)
-
-# =========================================================
-# MACHINE SELECTION
-# =========================================================
-
-def machine_selection():
-
-    st.title("🏭 Manufacturing Production Monitor")
-
-    col1, col2 = st.columns([3, 1])
-
-    with col1:
-
-        st.success(
-            f"Welcome, {st.session_state.operator_name}"
-        )
-
-        st.caption(
-            f"Operator Code: {st.session_state.operator_id}"
-        )
-
-    with col2:
-
-        if st.button(
-            "LOGOUT",
-            use_container_width=True
-        ):
-
-            logout()
-
-    st.divider()
-
-    st.subheader("Select Machine")
-
-    try:
-
-        machines = get_records("Machines")
-
-        active_machines = []
-
-        for machine in machines:
-
-            active = str(
-                machine.get("Active", "")
-            ).strip().upper()
-
-            if active == "TRUE":
-
-                active_machines.append(machine)
-
-        if not active_machines:
-
-            st.warning(
-                "No active machines found."
-            )
-
-            return
-
-        machine_options = {}
-
-        for machine in active_machines:
-
-            machine_id = str(
-                machine.get("MachineID", "")
-            ).strip()
-
-            machine_name = str(
-                machine.get("MachineName", "")
-            ).strip()
-
-            if machine_id and machine_name:
-
-                machine_options[machine_name] = machine_id
-
-        if not machine_options:
-
-            st.warning(
-                "Machine master data is incomplete."
-            )
-
-            return
-
-        selected_machine_name = st.selectbox(
-            "Machine",
-            options=list(machine_options.keys())
-        )
-
-        selected_machine_id = machine_options[
-            selected_machine_name
-        ]
-
-        st.write("")
-
-        if st.button(
-            "START MACHINE SESSION",
-            type="primary",
-            use_container_width=True
-        ):
-
-            st.session_state.machine_id = selected_machine_id
-
-            st.session_state.machine_name = selected_machine_name
-
-            st.session_state.machine_selected = True
-
-            st.rerun()
-
-    except Exception as e:
-
-        st.error(
-            "Unable to read machine data from Google Sheets."
-        )
-
-        st.exception(e)
-
-
 # =========================================================
 # MACHINE HOME
 # =========================================================
