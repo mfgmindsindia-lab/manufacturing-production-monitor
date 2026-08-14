@@ -112,96 +112,137 @@ def login_screen():
 
     st.write("")
 
-    col1, col2, col3 = st.columns([1, 2, 1])
+    try:
 
-    with col2:
+        operators = get_records("Operators")
 
-        operator_name = st.text_input(
-            "Operator Name",
-            placeholder="Enter your name",
-            key="login_operator_name"
-        )
+        # -----------------------------------------------------
+        # Get active operators only
+        # -----------------------------------------------------
 
-        operator_code = st.text_input(
-            "Operator Code",
-            type="password",
-            placeholder="Enter your operator code",
-            key="login_operator_code"
-        )
+        active_operators = []
 
-        st.write("")
+        for operator in operators:
 
-        login_button = st.button(
-            "LOGIN",
-            type="primary",
-            use_container_width=True
-        )
+            operator_id = str(
+                operator.get("OperatorID", "")
+            ).strip()
 
-        if login_button:
+            operator_name = str(
+                operator.get("OperatorName", "")
+            ).strip()
 
-            operator_name_input = operator_name.strip().lower()
-            operator_code_input = operator_code.strip()
+            active = str(
+                operator.get("Active", "")
+            ).strip().upper()
 
-            if not operator_name_input or not operator_code_input:
+            if (
+                operator_id
+                and operator_name
+                and active == "TRUE"
+            ):
 
-                st.warning(
-                    "Please enter Operator Name and Operator Code."
-                )
+                active_operators.append({
+                    "OperatorID": operator_id,
+                    "OperatorName": operator_name
+                })
 
-                return
+        if not active_operators:
 
-            try:
+            st.warning(
+                "No active operators found in the Operators sheet."
+            )
 
-                operators = get_records("Operators")
+            return
 
-                operator_found = None
+        # -----------------------------------------------------
+        # Operator dropdown
+        # -----------------------------------------------------
 
-                for operator in operators:
+        operator_names = [
+            operator["OperatorName"]
+            for operator in active_operators
+        ]
 
-                    sheet_operator_id = str(
-                        operator.get("OperatorID", "")
-                    ).strip()
+        col1, col2, col3 = st.columns([1, 2, 1])
 
-                    sheet_operator_name = str(
-                        operator.get("OperatorName", "")
-                    ).strip()
+        with col2:
 
-                    active = str(
-                        operator.get("Active", "")
-                    ).strip().upper()
+            selected_operator_name = st.selectbox(
+                "Operator Name",
+                options=operator_names,
+                index=None,
+                placeholder="Select your name"
+            )
 
-                    # ---------------------------------------------
-                    # LOGIN VALIDATION
-                    # Name + Operator Code + Active
-                    # ---------------------------------------------
+            operator_code = st.text_input(
+                "Operator Code",
+                type="password",
+                placeholder="Enter your operator code"
+            )
+
+            st.write("")
+
+            login_button = st.button(
+                "LOGIN",
+                type="primary",
+                use_container_width=True
+            )
+
+            if login_button:
+
+                if not selected_operator_name:
+
+                    st.warning(
+                        "Please select your name."
+                    )
+
+                    return
+
+                if not operator_code.strip():
+
+                    st.warning(
+                        "Please enter your operator code."
+                    )
+
+                    return
+
+                # -------------------------------------------------
+                # Find selected operator
+                # -------------------------------------------------
+
+                selected_operator = None
+
+                for operator in active_operators:
 
                     if (
-                        sheet_operator_name.lower()
-                        == operator_name_input
-                        and
-                        sheet_operator_id
-                        == operator_code_input
-                        and
-                        active == "TRUE"
+                        operator["OperatorName"]
+                        == selected_operator_name
                     ):
 
-                        operator_found = {
-                            "OperatorID": sheet_operator_id,
-                            "OperatorName": sheet_operator_name
-                        }
+                        selected_operator = operator
 
                         break
 
-                if operator_found:
+                # -------------------------------------------------
+                # Verify operator code
+                # -------------------------------------------------
+
+                if (
+                    selected_operator
+                    and
+                    operator_code.strip()
+                    == selected_operator["OperatorID"]
+                ):
 
                     st.session_state.logged_in = True
 
                     st.session_state.operator_id = (
-                        operator_found["OperatorID"]
+                        selected_operator["OperatorID"]
                     )
 
                     st.session_state.operator_name = (
-                        operator_found["OperatorName"]
+                        selected_operator["OperatorName"]
                     )
 
                     st.rerun()
@@ -209,17 +250,16 @@ def login_screen():
                 else:
 
                     st.error(
-                        "Invalid Operator Name or Operator Code."
+                        "Invalid Operator Code."
                     )
 
-            except Exception as e:
+    except Exception as e:
 
-                st.error(
-                    "Unable to read operator data from Google Sheets."
-                )
+        st.error(
+            "Unable to load operators from Google Sheets."
+        )
 
-                st.exception(e)
-
+        st.exception(e)
 
 # =========================================================
 # MACHINE SELECTION
