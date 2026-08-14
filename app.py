@@ -5,6 +5,9 @@ from google.oauth2.service_account import Credentials
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+APP_VERSION = "MACHINE-CARD-FIX-001"
+st.write(f"APP VERSION: {APP_VERSION}")
+
 
 # =========================================================
 # PAGE CONFIGURATION
