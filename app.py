@@ -2,6 +2,9 @@ import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
 
+from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
+
 
 # =========================================================
 # PAGE CONFIGURATION
@@ -16,7 +19,22 @@ st.set_page_config(
 
 
 # =========================================================
-# GOOGLE SHEETS CONNECTION
+# INDIA TIME
+# =========================================================
+
+INDIA_TZ = ZoneInfo("Asia/Kolkata")
+
+
+def india_now():
+    return datetime.now(INDIA_TZ)
+
+
+def timestamp_now():
+    return india_now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+# =========================================================
+# GOOGLE SHEETS
 # =========================================================
 
 SCOPES = [
@@ -33,9 +51,7 @@ def connect_google_sheets():
         scopes=SCOPES
     )
 
-    client = gspread.authorize(credentials)
-
-    return client
+    return gspread.authorize(credentials)
 
 
 @st.cache_resource
@@ -46,11 +62,7 @@ def get_spreadsheet():
     return client.open("Manufacturing Production DB")
 
 
-# =========================================================
-# READ GOOGLE SHEET DATA
-# =========================================================
-
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=15)
 def get_records(sheet_name):
 
     spreadsheet = get_spreadsheet()
@@ -61,26 +73,473 @@ def get_records(sheet_name):
 
 
 # =========================================================
+# CLEAR CACHE AFTER WRITING
+# =========================================================
+
+def refresh_data():
+
+    get_records.clear()
+
+
+# =========================================================
+# SHIFT CALCULATION
+# =========================================================
+
+def get_current_shift():
+
+    now = india_now()
+
+    current_time = now.time()
+
+    shift_a_start = time(8, 30)
+    shift_a_end = time(20, 0)
+
+    # ---------------------------------------------
+    # SHIFT A
+    # 08:30 AM → 08:00 PM
+    # ---------------------------------------------
+
+    if shift_a_start <= current_time < shift_a_end:
+
+        shift_id = "A"
+
+        shift_date = now.date()
+
+    # ---------------------------------------------
+    # SHIFT B
+    # 08:00 PM → 08:30 AM
+    # ---------------------------------------------
+
+    else:
+
+        shift_id = "B"
+
+        # Between midnight and 08:30 AM,
+        # the shift belongs to the previous date.
+        if current_time < shift_a_start:
+
+            shift_date = now.date() - timedelta(days=1)
+
+        else:
+
+            shift_date = now.date()
+
+    return shift_id, shift_date.strftime("%Y-%m-%d")
+
+
+# =========================================================
 # SESSION STATE
 # =========================================================
 
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
+defaults = {
 
-if "operator_id" not in st.session_state:
-    st.session_state.operator_id = None
+    "logged_in": False,
 
-if "operator_name" not in st.session_state:
-    st.session_state.operator_name = None
+    "operator_id": None,
 
-if "machine_selected" not in st.session_state:
+    "operator_name": None,
+
+    "machine_selected": False,
+
+    "machine_id": None,
+
+    "machine_name": None,
+
+    "machine_session_active": False,
+
+    "session_id": None,
+
+    "current_shift": None,
+
+    "shift_date": None
+}
+
+
+for key, value in defaults.items():
+
+    if key not in st.session_state:
+
+        st.session_state[key] = value
+
+
+# =========================================================
+# GENERATE SESSION ID
+# =========================================================
+
+def generate_session_id():
+
+    now = india_now()
+
+    return (
+        "MS-"
+        + now.strftime("%Y%m%d-%H%M%S")
+        + "-"
+        + str(st.session_state.operator_id)
+        + "-"
+        + str(st.session_state.machine_id)
+    )
+
+
+# =========================================================
+# FIND ACTIVE MACHINE SESSION
+# =========================================================
+
+def get_active_machine_session(machine_id):
+
+    sessions = get_records("MachineSessions")
+
+    for session in sessions:
+
+        session_machine = str(
+            session.get("MachineID", "")
+        ).strip()
+
+        status = str(
+            session.get("Status", "")
+        ).strip().upper()
+
+        if (
+            session_machine == str(machine_id)
+            and status == "ACTIVE"
+        ):
+
+            return session
+
+    return None
+
+
+# =========================================================
+# CLOSE MACHINE SESSION
+# =========================================================
+
+def close_machine_session(session):
+
+    spreadsheet = get_spreadsheet()
+
+    worksheet = spreadsheet.worksheet(
+        "MachineSessions"
+    )
+
+    session_id = str(
+        session.get("SessionID", "")
+    ).strip()
+
+    session_ids = worksheet.col_values(1)
+
+    row_number = None
+
+    for index, value in enumerate(session_ids, start=1):
+
+        if str(value).strip() == session_id:
+
+            row_number = index
+
+            break
+
+    if row_number is None:
+
+        return False
+
+    # Column H = LogoutTime
+    worksheet.update_cell(
+        row_number,
+        8,
+        timestamp_now()
+    )
+
+    # Column I = Status
+    worksheet.update_cell(
+        row_number,
+        9,
+        "CLOSED"
+    )
+
+    return True
+
+
+# =========================================================
+# CREATE MACHINE SESSION
+# =========================================================
+
+def create_machine_session():
+
+    spreadsheet = get_spreadsheet()
+
+    worksheet = spreadsheet.worksheet(
+        "MachineSessions"
+    )
+
+    shift_id, shift_date = get_current_shift()
+
+    session_id = generate_session_id()
+
+    now = timestamp_now()
+
+    row = [
+
+        session_id,
+
+        shift_date,
+
+        shift_id,
+
+        st.session_state.machine_id,
+
+        st.session_state.operator_id,
+
+        st.session_state.operator_name,
+
+        now,
+
+        "",
+
+        "ACTIVE",
+
+        now
+    ]
+
+    worksheet.append_row(
+        row,
+        value_input_option="USER_ENTERED"
+    )
+
+    refresh_data()
+
+    st.session_state.session_id = session_id
+
+    st.session_state.current_shift = shift_id
+
+    st.session_state.shift_date = shift_date
+
+    st.session_state.machine_session_active = True
+
+    return True
+
+
+# =========================================================
+# LOG OPERATOR HANDOVER
+# =========================================================
+
+def log_operator_handover(
+    previous_session,
+    previous_operator_name
+):
+
+    spreadsheet = get_spreadsheet()
+
+    worksheet = spreadsheet.worksheet(
+        "ActivityLog"
+    )
+
+    shift_id, shift_date = get_current_shift()
+
+    now = timestamp_now()
+
+    entry_id = (
+        "E-"
+        + india_now().strftime("%Y%m%d%H%M%S")
+    )
+
+    row = [
+
+        entry_id,                                      # EntryID
+        shift_date,                                    # Date
+        shift_id,                                      # ShiftID
+        st.session_state.machine_id,                  # MachineID
+        st.session_state.operator_id,                 # OperatorID
+        st.session_state.operator_name,               # OperatorName
+        "OPERATOR_HANDOVER",                          # ActivityType
+        "",                                            # PreviousPartCode
+        "",                                            # PreviousSetupID
+        "",                                            # PartCode
+        "",                                            # PartName
+        "",                                            # SetupID
+        previous_session.get("LoginTime", ""),         # StartTime
+        now,                                           # EndTime
+        "",                                            # DurationSeconds
+        "",                                            # CycleTimeSeconds
+        f"Previous Operator: {previous_operator_name}", # DowntimeReason
+        now                                            # CreatedAt
+
+    ]
+
+    worksheet.append_row(
+        row,
+        value_input_option="USER_ENTERED"
+    )
+
+
+# =========================================================
+# START / TAKEOVER MACHINE
+# =========================================================
+
+def start_machine():
+
+    active_session = get_active_machine_session(
+        st.session_state.machine_id
+    )
+
+    # -----------------------------------------------------
+    # MACHINE FREE
+    # -----------------------------------------------------
+
+    if active_session is None:
+
+        create_machine_session()
+
+        st.success(
+            "Machine session started successfully."
+        )
+
+        st.rerun()
+
+    # -----------------------------------------------------
+    # SAME OPERATOR ALREADY ACTIVE
+    # -----------------------------------------------------
+
+    active_operator_id = str(
+        active_session.get("OperatorID", "")
+    ).strip()
+
+    if (
+        active_operator_id
+        == str(st.session_state.operator_id)
+    ):
+
+        st.session_state.session_id = (
+            active_session.get("SessionID")
+        )
+
+        st.session_state.machine_session_active = True
+
+        st.session_state.current_shift = (
+            active_session.get("ShiftID")
+        )
+
+        st.session_state.shift_date = (
+            active_session.get("Date")
+        )
+
+        st.info(
+            "You already have an active session "
+            "on this machine."
+        )
+
+        st.rerun()
+
+    # -----------------------------------------------------
+    # MACHINE OCCUPIED BY ANOTHER OPERATOR
+    # -----------------------------------------------------
+
+    st.warning(
+        "This machine is currently occupied."
+    )
+
+    st.session_state.occupied_session = active_session
+
+    st.session_state.show_takeover = True
+
+
+# =========================================================
+# TAKEOVER MACHINE
+# =========================================================
+
+def takeover_machine():
+
+    active_session = st.session_state.get(
+        "occupied_session"
+    )
+
+    if not active_session:
+
+        st.error(
+            "Active machine session could not be found."
+        )
+
+        return
+
+    previous_operator_name = str(
+        active_session.get("OperatorName", "")
+    ).strip()
+
+    previous_operator_id = str(
+        active_session.get("OperatorID", "")
+    ).strip()
+
+    # -----------------------------------------------------
+    # CLOSE PREVIOUS SESSION
+    # -----------------------------------------------------
+
+    close_machine_session(
+        active_session
+    )
+
+    # -----------------------------------------------------
+    # RECORD HANDOVER
+    # -----------------------------------------------------
+
+    log_operator_handover(
+        active_session,
+        previous_operator_name
+    )
+
+    # -----------------------------------------------------
+    # CREATE NEW SESSION
+    # -----------------------------------------------------
+
+    create_machine_session()
+
+    st.session_state.show_takeover = False
+
+    st.session_state.occupied_session = None
+
+    st.success(
+        f"Machine successfully handed over from "
+        f"{previous_operator_name} ({previous_operator_id})."
+    )
+
+    st.rerun()
+
+
+# =========================================================
+# END CURRENT MACHINE SESSION
+# =========================================================
+
+def end_current_machine_session():
+
+    session_id = st.session_state.session_id
+
+    if not session_id:
+
+        return
+
+    active_session = get_active_machine_session(
+        st.session_state.machine_id
+    )
+
+    if active_session:
+
+        close_machine_session(
+            active_session
+        )
+
+    st.session_state.machine_session_active = False
+
+    st.session_state.session_id = None
+
     st.session_state.machine_selected = False
 
-if "machine_id" not in st.session_state:
     st.session_state.machine_id = None
 
-if "machine_name" not in st.session_state:
     st.session_state.machine_name = None
+
+    st.session_state.current_shift = None
+
+    st.session_state.shift_date = None
+
+    refresh_data()
+
+    st.rerun()
 
 
 # =========================================================
@@ -89,15 +548,24 @@ if "machine_name" not in st.session_state:
 
 def logout():
 
-    st.session_state.logged_in = False
+    # ---------------------------------------------
+    # If operator has active machine session,
+    # close it before logout.
+    # ---------------------------------------------
 
-    st.session_state.operator_id = None
-    st.session_state.operator_name = None
+    if st.session_state.machine_session_active:
 
-    st.session_state.machine_selected = False
+        active_session = get_active_machine_session(
+            st.session_state.machine_id
+        )
 
-    st.session_state.machine_id = None
-    st.session_state.machine_name = None
+        if active_session:
+
+            close_machine_session(
+                active_session
+            )
+
+    st.session_state.clear()
 
     st.rerun()
 
@@ -108,7 +576,9 @@ def logout():
 
 def login_screen():
 
-    st.title("🏭 Manufacturing Production Monitor")
+    st.title(
+        "🏭 Manufacturing Production Monitor"
+    )
 
     st.markdown("### Operator Login")
 
@@ -117,10 +587,6 @@ def login_screen():
     try:
 
         operators = get_records("Operators")
-
-        # -------------------------------------------------
-        # ACTIVE OPERATORS
-        # -------------------------------------------------
 
         active_operators = []
 
@@ -152,14 +618,10 @@ def login_screen():
         if not active_operators:
 
             st.warning(
-                "No active operators found in the Operators sheet."
+                "No active operators found."
             )
 
             return
-
-        # -------------------------------------------------
-        # CREATE DROPDOWN OPTIONS
-        # -------------------------------------------------
 
         operator_options = {}
 
@@ -170,19 +632,21 @@ def login_screen():
                 f"{operator['OperatorName']}"
             )
 
-            operator_options[display_name] = operator
+            operator_options[
+                display_name
+            ] = operator
 
-        # -------------------------------------------------
-        # LOGIN FORM
-        # -------------------------------------------------
-
-        col1, col2, col3 = st.columns([1, 2, 1])
+        col1, col2, col3 = st.columns(
+            [1, 2, 1]
+        )
 
         with col2:
 
             selected_display = st.selectbox(
                 "Operator",
-                options=list(operator_options.keys()),
+                options=list(
+                    operator_options.keys()
+                ),
                 index=None,
                 placeholder="Select your ID and name"
             )
@@ -206,7 +670,7 @@ def login_screen():
                 if not selected_display:
 
                     st.warning(
-                        "Please select your Operator ID and Name."
+                        "Please select your operator."
                     )
 
                     return
@@ -214,18 +678,16 @@ def login_screen():
                 if not operator_code.strip():
 
                     st.warning(
-                        "Please enter your Operator Code."
+                        "Please enter your operator code."
                     )
 
                     return
 
-                selected_operator = operator_options[
-                    selected_display
-                ]
-
-                # -------------------------------------------------
-                # VERIFY CODE
-                # -------------------------------------------------
+                selected_operator = (
+                    operator_options[
+                        selected_display
+                    ]
+                )
 
                 if (
                     operator_code.strip()
@@ -235,11 +697,15 @@ def login_screen():
                     st.session_state.logged_in = True
 
                     st.session_state.operator_id = (
-                        selected_operator["OperatorID"]
+                        selected_operator[
+                            "OperatorID"
+                        ]
                     )
 
                     st.session_state.operator_name = (
-                        selected_operator["OperatorName"]
+                        selected_operator[
+                            "OperatorName"
+                        ]
                     )
 
                     st.rerun()
@@ -253,7 +719,7 @@ def login_screen():
     except Exception as e:
 
         st.error(
-            "Unable to load operators from Google Sheets."
+            "Unable to load operators."
         )
 
         st.exception(e)
@@ -265,22 +731,22 @@ def login_screen():
 
 def machine_selection():
 
-    st.title("🏭 Manufacturing Production Monitor")
-
-    # -----------------------------------------------------
-    # OPERATOR INFORMATION
-    # -----------------------------------------------------
+    st.title(
+        "🏭 Manufacturing Production Monitor"
+    )
 
     col1, col2 = st.columns([3, 1])
 
     with col1:
 
         st.success(
-            f"Welcome, {st.session_state.operator_name}"
+            f"Welcome, "
+            f"{st.session_state.operator_name}"
         )
 
         st.caption(
-            f"Operator ID: {st.session_state.operator_id}"
+            f"Operator ID: "
+            f"{st.session_state.operator_id}"
         )
 
     with col2:
@@ -294,11 +760,9 @@ def machine_selection():
 
     st.divider()
 
-    # -----------------------------------------------------
-    # MACHINE SELECTION
-    # -----------------------------------------------------
-
-    st.subheader("Select Machine")
+    st.subheader(
+        "Select Machine"
+    )
 
     try:
 
@@ -334,7 +798,7 @@ def machine_selection():
         if not active_machines:
 
             st.warning(
-                "No active machines found in the Machines sheet."
+                "No active machines found."
             )
 
             return
@@ -348,11 +812,15 @@ def machine_selection():
                 f"{machine['MachineName']}"
             )
 
-            machine_options[display_name] = machine
+            machine_options[
+                display_name
+            ] = machine
 
         selected_machine_display = st.selectbox(
             "Machine",
-            options=list(machine_options.keys()),
+            options=list(
+                machine_options.keys()
+            ),
             index=None,
             placeholder="Select machine"
         )
@@ -360,7 +828,7 @@ def machine_selection():
         st.write("")
 
         if st.button(
-            "START MACHINE SESSION",
+            "CONTINUE",
             type="primary",
             use_container_width=True
         ):
@@ -373,9 +841,11 @@ def machine_selection():
 
                 return
 
-            selected_machine = machine_options[
-                selected_machine_display
-            ]
+            selected_machine = (
+                machine_options[
+                    selected_machine_display
+                ]
+            )
 
             st.session_state.machine_id = (
                 selected_machine["MachineID"]
@@ -385,14 +855,39 @@ def machine_selection():
                 selected_machine["MachineName"]
             )
 
-            st.session_state.machine_selected = True
+            # Check the machine
+            # before creating a session.
 
-            st.rerun()
+            active_session = (
+                get_active_machine_session(
+                    st.session_state.machine_id
+                )
+            )
+
+            if active_session is None:
+
+                create_machine_session()
+
+                st.session_state.machine_selected = True
+
+                st.rerun()
+
+            else:
+
+                st.session_state.machine_selected = True
+
+                st.session_state.occupied_session = (
+                    active_session
+                )
+
+                st.session_state.show_takeover = True
+
+                st.rerun()
 
     except Exception as e:
 
         st.error(
-            "Unable to load machines from Google Sheets."
+            "Unable to load machines."
         )
 
         st.exception(e)
@@ -404,60 +899,170 @@ def machine_selection():
 
 def machine_home():
 
-    st.title("🏭 Manufacturing Production Monitor")
+    # -----------------------------------------------------
+    # TAKEOVER SCREEN
+    # -----------------------------------------------------
+
+    if st.session_state.get(
+        "show_takeover",
+        False
+    ):
+
+        active_session = (
+            st.session_state.get(
+                "occupied_session"
+            )
+        )
+
+        st.title(
+            "⚠️ Machine Already Occupied"
+        )
+
+        if active_session:
+
+            previous_operator = (
+                active_session.get(
+                    "OperatorName",
+                    "Unknown"
+                )
+            )
+
+            previous_operator_id = (
+                active_session.get(
+                    "OperatorID",
+                    ""
+                )
+            )
+
+            login_time = (
+                active_session.get(
+                    "LoginTime",
+                    ""
+                )
+            )
+
+            st.warning(
+                f"Machine **"
+                f"{st.session_state.machine_name}"
+                f"** is currently being operated by "
+                f"**{previous_operator} "
+                f"({previous_operator_id})**."
+            )
+
+            st.write(
+                f"Current session started: "
+                f"**{login_time}**"
+            )
+
+            st.write("")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+
+                if st.button(
+                    "TAKE OVER MACHINE",
+                    type="primary",
+                    use_container_width=True
+                ):
+
+                    takeover_machine()
+
+            with col2:
+
+                if st.button(
+                    "CANCEL",
+                    use_container_width=True
+                ):
+
+                    st.session_state.show_takeover = False
+
+                    st.session_state.occupied_session = None
+
+                    st.session_state.machine_selected = False
+
+                    st.session_state.machine_id = None
+
+                    st.session_state.machine_name = None
+
+                    st.rerun()
+
+        return
 
     # -----------------------------------------------------
-    # HEADER
+    # NORMAL MACHINE HOME
     # -----------------------------------------------------
+
+    st.title(
+        "🏭 Manufacturing Production Monitor"
+    )
 
     col1, col2 = st.columns([3, 1])
 
     with col1:
 
         st.success(
-            f"Operator: {st.session_state.operator_name}"
+            f"Operator: "
+            f"{st.session_state.operator_name}"
         )
 
         st.info(
-            f"Machine: {st.session_state.machine_name}"
+            f"Machine: "
+            f"{st.session_state.machine_name}"
         )
 
     with col2:
 
         if st.button(
-            "LOGOUT",
+            "END MACHINE SESSION",
             use_container_width=True
         ):
 
-            logout()
+            end_current_machine_session()
 
     st.divider()
 
     # -----------------------------------------------------
-    # TEMPORARY SCREEN
+    # SESSION INFORMATION
     # -----------------------------------------------------
 
-    st.subheader("Machine Session")
-
-    st.write(
-        "Machine session functionality will be added next."
+    st.subheader(
+        "Current Machine Session"
     )
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
 
     with col1:
 
         st.metric(
-            "Operator ID",
-            st.session_state.operator_id
+            "Operator",
+            st.session_state.operator_name
         )
 
     with col2:
 
         st.metric(
-            "Machine ID",
-            st.session_state.machine_id
+            "Machine",
+            st.session_state.machine_name
         )
+
+    with col3:
+
+        st.metric(
+            "Shift",
+            st.session_state.current_shift
+        )
+
+    st.write("")
+
+    st.info(
+        f"Session ID: "
+        f"{st.session_state.session_id}"
+    )
+
+    st.success(
+        "Machine is currently assigned to you."
+    )
 
 
 # =========================================================
