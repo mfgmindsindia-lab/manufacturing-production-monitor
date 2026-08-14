@@ -16,7 +16,93 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed"
 )
+st.markdown(
+    """
+    <style>
 
+    .machine-card {
+        padding: 20px;
+        border-radius: 16px;
+        margin-bottom: 8px;
+        border: 1px solid rgba(255,255,255,0.12);
+    }
+
+    .machine-card.available {
+        background: rgba(0,180,80,0.08);
+        border-left: 6px solid #00b450;
+    }
+
+    .machine-card.occupied {
+        background: rgba(220,50,50,0.08);
+        border-left: 6px solid #dc3232;
+    }
+
+    .machine-card.my-machine {
+        background: rgba(30,120,255,0.10);
+        border-left: 6px solid #2878ff;
+    }
+
+    .machine-title {
+        font-size: 23px;
+        font-weight: 700;
+        margin-bottom: 12px;
+    }
+
+    .machine-status {
+        font-size: 18px;
+        font-weight: 700;
+        margin-bottom: 12px;
+    }
+
+    .available-text {
+        color: #00b450;
+    }
+
+    .occupied-text {
+        color: #dc3232;
+    }
+
+    .my-text {
+        color: #2878ff;
+    }
+
+    .machine-info {
+        font-size: 15px;
+        margin-top: 6px;
+    }
+
+    /* Phone friendly */
+
+    @media (max-width: 768px) {
+
+        .machine-card {
+            padding: 18px;
+            border-radius: 14px;
+        }
+
+        .machine-title {
+            font-size: 20px;
+        }
+
+        .machine-status {
+            font-size: 17px;
+        }
+
+        .machine-info {
+            font-size: 14px;
+        }
+
+        div.stButton > button {
+            min-height: 52px;
+            font-size: 16px;
+        }
+
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
 # =========================================================
 # INDIA TIME
