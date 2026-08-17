@@ -69,115 +69,6 @@ def refresh_data():
 
 
 # =========================================================
-# GLOBAL MOBILE / CARD CSS
-# =========================================================
-
-st.markdown(
-    """
-    <style>
-
-    /* Machine cards */
-
-    .machine-card {
-        padding: 18px;
-        border-radius: 16px;
-        min-height: 190px;
-        border: 1px solid rgba(255,255,255,0.12);
-        box-sizing: border-box;
-    }
-
-    .machine-available {
-        background: rgba(0,180,80,0.08);
-        border-left: 6px solid #00b450;
-    }
-
-    .machine-running {
-        background: rgba(220,50,50,0.08);
-        border-left: 6px solid #dc3232;
-    }
-
-    .machine-mine {
-        background: rgba(40,120,255,0.10);
-        border-left: 6px solid #2878ff;
-    }
-
-    .machine-title {
-        font-size: 20px;
-        font-weight: 700;
-        line-height: 1.2;
-        margin-bottom: 8px;
-    }
-
-    .machine-name {
-        font-size: 14px;
-        line-height: 1.35;
-        min-height: 38px;
-        opacity: 0.9;
-    }
-
-    .machine-status {
-        font-size: 17px;
-        font-weight: 700;
-        margin-top: 14px;
-        margin-bottom: 10px;
-    }
-
-    .machine-detail {
-        font-size: 14px;
-        margin-top: 6px;
-        line-height: 1.3;
-    }
-
-    /* Touch-friendly buttons */
-
-    div.stButton > button {
-        min-height: 50px;
-        font-size: 15px;
-        font-weight: 600;
-    }
-
-    /* Better spacing */
-
-    [data-testid="stHorizontalBlock"] {
-        gap: 1rem;
-    }
-
-    /* Mobile */
-
-    @media (max-width: 768px) {
-
-        .machine-card {
-            min-height: 175px;
-            padding: 16px;
-        }
-
-        .machine-title {
-            font-size: 18px;
-        }
-
-        .machine-status {
-            font-size: 16px;
-        }
-
-        .machine-detail,
-        .machine-name {
-            font-size: 14px;
-        }
-
-        div.stButton > button {
-            min-height: 54px;
-            font-size: 16px;
-        }
-
-    }
-
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-
-# =========================================================
 # SHIFT CALCULATION
 # =========================================================
 
@@ -227,6 +118,16 @@ defaults = {
     "shift_date": None,
     "show_takeover": False,
     "occupied_session": None,
+    "production_active": False,
+    "production_run_id": None,
+    "production_start_time": None,
+    "production_part": None,
+    "production_grade": None,
+    "production_setup": None,
+    "production_cycle_time": None,
+    "changeover_active": False,
+    "changeover_id": None,
+    "changeover_start_time": None,
 }
 
 for key, value in defaults.items():
@@ -529,7 +430,7 @@ def login_screen():
         "🏭 Manufacturing Production Monitor"
     )
 
-    st.markdown("### Operator Login")
+    st.subheader("Operator Login")
 
     st.write("")
 
@@ -674,263 +575,774 @@ def machine_selection():
 
     st.divider()
 
-    st.subheader("Machine Status")
-
     try:
-
         machines = get_records("Machines")
-
         active_machines = []
 
         for machine in machines:
+            machine_id = str(machine.get("MachineID", "")).strip()
+            machine_name = str(machine.get("MachineName", "")).strip()
+            active = str(machine.get("Active", "")).strip().upper()
 
-            machine_id = str(
-                machine.get("MachineID", "")
-            ).strip()
-
-            machine_name = str(
-                machine.get("MachineName", "")
-            ).strip()
-
-            active = str(
-                machine.get("Active", "")
-            ).strip().upper()
-
-            if (
-                machine_id
-                and machine_name
-                and active == "TRUE"
-            ):
-
+            if machine_id and machine_name and active == "TRUE":
                 active_machines.append({
                     "MachineID": machine_id,
                     "MachineName": machine_name,
                 })
 
         if not active_machines:
-
-            st.warning(
-                "No active machines found in Machines sheet."
-            )
+            st.warning("No active machines found in Machines sheet.")
             return
 
-        # -----------------------------------------------------
-        # THREE MACHINE CARDS PER ROW
-        # -----------------------------------------------------
+        # Exactly three native Streamlit cards per row.
+        for start in range(0, len(active_machines), 3):
+            row_machines = active_machines[start:start + 3]
+            columns = st.columns(3)
 
-        columns = st.columns(3)
+            for index, machine in enumerate(row_machines):
+                machine_id = machine["MachineID"]
+                machine_name = machine["MachineName"]
 
-        for index, machine in enumerate(active_machines):
+                with columns[index]:
+                    active_session = get_active_machine_session(machine_id)
 
-            machine_id = machine["MachineID"]
-            machine_name = machine["MachineName"]
+                    if active_session is None:
+                        with st.container(border=True):
+                            st.subheader(machine_id)
+                            st.write(machine_name)
+                            st.success("🟢 AVAILABLE")
+                            st.caption("No operator assigned")
 
-            active_session = get_active_machine_session(
-                machine_id
-            )
-
-            col = columns[index % 3]
-
-            with col:
-
-                # =================================================
-                # AVAILABLE
-                # =================================================
-
-                if active_session is None:
-
-                    st.markdown(
-                        f"""
-                        <div class="machine-card machine-available">
-
-                            <div class="machine-title">
-                                {machine_id}
-                            </div>
-
-                            <div class="machine-name">
-                                {machine_name}
-                            </div>
-
-                            <div class="machine-status">
-                                🟢 AVAILABLE
-                            </div>
-
-                            <div class="machine-detail">
-                                No operator assigned
-                            </div>
-
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-
-                    if st.button(
-                        "SELECT MACHINE",
-                        key=f"select_{machine_id}",
-                        type="primary",
-                        use_container_width=True,
-                    ):
-
-                        st.session_state.machine_id = machine_id
-                        st.session_state.machine_name = machine_name
-
-                        create_machine_session()
-
-                        st.session_state.machine_selected = True
-
-                        st.rerun()
-
-                # =================================================
-                # OCCUPIED
-                # =================================================
-
-                else:
-
-                    current_operator = str(
-                        active_session.get(
-                            "OperatorName",
-                            "Unknown",
-                        )
-                    ).strip()
-
-                    current_operator_id = str(
-                        active_session.get(
-                            "OperatorID",
-                            "",
-                        )
-                    ).strip()
-
-                    login_time = str(
-                        active_session.get(
-                            "LoginTime",
-                            "",
-                        )
-                    ).strip()
-
-                    is_my_machine = (
-                        current_operator_id
-                        == str(
-                            st.session_state.operator_id
-                        )
-                    )
-
-                    # =============================================
-                    # MY MACHINE
-                    # =============================================
-
-                    if is_my_machine:
-
-                        st.markdown(
-                            f"""
-                            <div class="machine-card machine-mine">
-
-                                <div class="machine-title">
-                                    {machine_id}
-                                </div>
-
-                                <div class="machine-name">
-                                    {machine_name}
-                                </div>
-
-                                <div class="machine-status">
-                                    🔵 YOUR MACHINE
-                                </div>
-
-                                <div class="machine-detail">
-                                    👤 {current_operator}
-                                </div>
-
-                                <div class="machine-detail">
-                                    🕐 Started: {login_time}
-                                </div>
-
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
-                        )
-
-                        if st.button(
-                            "OPEN MACHINE",
-                            key=f"open_{machine_id}",
-                            type="primary",
-                            use_container_width=True,
-                        ):
-
-                            st.session_state.machine_id = machine_id
-                            st.session_state.machine_name = machine_name
-                            st.session_state.session_id = (
-                                active_session.get("SessionID")
-                            )
-                            st.session_state.current_shift = (
-                                active_session.get("ShiftID")
-                            )
-                            st.session_state.shift_date = (
-                                active_session.get("Date")
-                            )
-                            st.session_state.machine_session_active = True
-                            st.session_state.machine_selected = True
-
-                            st.rerun()
-
-                    # =============================================
-                    # OTHER OPERATOR
-                    # =============================================
+                            if st.button(
+                                "SELECT MACHINE",
+                                key=f"select_{machine_id}",
+                                type="primary",
+                                use_container_width=True,
+                            ):
+                                st.session_state.machine_id = machine_id
+                                st.session_state.machine_name = machine_name
+                                create_machine_session()
+                                st.session_state.machine_selected = True
+                                st.rerun()
 
                     else:
+                        current_operator = str(
+                            active_session.get("OperatorName", "Unknown")
+                        ).strip()
 
-                        st.markdown(
-                            f"""
-                            <div class="machine-card machine-running">
+                        current_operator_id = str(
+                            active_session.get("OperatorID", "")
+                        ).strip()
 
-                                <div class="machine-title">
-                                    {machine_id}
-                                </div>
+                        login_time = str(
+                            active_session.get("LoginTime", "")
+                        ).strip()
 
-                                <div class="machine-name">
-                                    {machine_name}
-                                </div>
-
-                                <div class="machine-status">
-                                    🔴 RUNNING
-                                </div>
-
-                                <div class="machine-detail">
-                                    👤 {current_operator}
-                                    ({current_operator_id})
-                                </div>
-
-                                <div class="machine-detail">
-                                    🕐 Started: {login_time}
-                                </div>
-
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
+                        is_my_machine = (
+                            current_operator_id
+                            == str(st.session_state.operator_id)
                         )
 
-                        if st.button(
-                            "TAKE OVER",
-                            key=f"takeover_{machine_id}",
-                            use_container_width=True,
-                        ):
+                        if is_my_machine:
+                            with st.container(border=True):
+                                st.subheader(machine_id)
+                                st.write(machine_name)
+                                st.info("🔵 YOUR MACHINE")
+                                st.write(f"👤 {current_operator}")
+                                st.caption(f"🕐 Started: {login_time}")
 
-                            st.session_state.machine_id = machine_id
-                            st.session_state.machine_name = machine_name
-                            st.session_state.occupied_session = (
-                                active_session
-                            )
-                            st.session_state.machine_selected = True
-                            st.session_state.show_takeover = True
+                                if st.button(
+                                    "OPEN MACHINE",
+                                    key=f"open_{machine_id}",
+                                    type="primary",
+                                    use_container_width=True,
+                                ):
+                                    st.session_state.machine_id = machine_id
+                                    st.session_state.machine_name = machine_name
+                                    st.session_state.session_id = active_session.get("SessionID")
+                                    st.session_state.current_shift = active_session.get("ShiftID")
+                                    st.session_state.shift_date = active_session.get("Date")
+                                    st.session_state.machine_session_active = True
+                                    st.session_state.machine_selected = True
+                                    st.rerun()
 
-                            st.rerun()
+                        else:
+                            with st.container(border=True):
+                                st.subheader(machine_id)
+                                st.write(machine_name)
+                                st.error("🔴 RUNNING")
+                                st.write(
+                                    f"👤 {current_operator} "
+                                    f"({current_operator_id})"
+                                )
+                                st.caption(f"🕐 Started: {login_time}")
+
+                                if st.button(
+                                    "TAKE OVER",
+                                    key=f"takeover_{machine_id}",
+                                    use_container_width=True,
+                                ):
+                                    st.session_state.machine_id = machine_id
+                                    st.session_state.machine_name = machine_name
+                                    st.session_state.occupied_session = active_session
+                                    st.session_state.machine_selected = True
+                                    st.session_state.show_takeover = True
+                                    st.rerun()
 
     except Exception as e:
+        st.error("Unable to load machine status.")
+        st.exception(e)
 
-        st.error(
-            "Unable to load machine status."
+
+
+# =========================================================
+# PRODUCTION / CHANGEOVER HELPERS
+# =========================================================
+
+def get_or_create_worksheet(sheet_name, headers):
+    spreadsheet = get_spreadsheet()
+
+    try:
+        worksheet = spreadsheet.worksheet(sheet_name)
+    except gspread.WorksheetNotFound:
+        worksheet = spreadsheet.add_worksheet(
+            title=sheet_name,
+            rows=1000,
+            cols=len(headers),
+        )
+        worksheet.append_row(headers, value_input_option="USER_ENTERED")
+
+    return worksheet
+
+
+def normalize_cycle_time(value):
+    """
+    Converts operator input:
+        2.30 -> 150 seconds
+        5.15 -> 315 seconds
+        0.45 -> 45 seconds
+
+    The two digits after the decimal are interpreted as seconds.
+    """
+    value = str(value).strip()
+
+    if not value:
+        raise ValueError("Cycle time is required.")
+
+    if "." not in value:
+        raise ValueError(
+            "Enter cycle time as MM.SS, for example 2.30."
         )
 
-        st.exception(e)
+    minutes_text, seconds_text = value.split(".", 1)
+
+    if not minutes_text.isdigit() or not seconds_text.isdigit():
+        raise ValueError(
+            "Cycle time must be in MM.SS format, for example 2.30."
+        )
+
+    seconds_text = seconds_text[:2].ljust(2, "0")
+
+    minutes = int(minutes_text)
+    seconds = int(seconds_text)
+
+    if seconds >= 60:
+        raise ValueError(
+            "Seconds must be between 00 and 59."
+        )
+
+    return minutes * 60 + seconds
+
+
+def format_cycle_time(seconds):
+    try:
+        total = int(seconds)
+    except (TypeError, ValueError):
+        return ""
+
+    return f"{total // 60}.{total % 60:02d}"
+
+
+def get_part_master():
+    try:
+        return get_records("PartMaster")
+    except Exception:
+        return []
+
+
+def get_setup_master():
+    try:
+        return get_records("Setup")
+    except Exception:
+        return []
+
+
+def get_part_options():
+    rows = get_part_master()
+    options = []
+
+    for row in rows:
+        part = str(row.get("PartName", "")).strip()
+        grade = str(row.get("MaterialGrade", "")).strip()
+        active = str(row.get("Active", "TRUE")).strip().upper()
+
+        if part and active in ("TRUE", "YES", "1", "ACTIVE", ""):
+            options.append({
+                "PartName": part,
+                "MaterialGrade": grade,
+            })
+
+    return options
+
+
+def get_grade_options(part_name):
+    rows = get_part_options()
+
+    grades = sorted({
+        row["MaterialGrade"]
+        for row in rows
+        if row["PartName"] == part_name
+        and row["MaterialGrade"]
+    })
+
+    return grades
+
+
+def get_setup_options():
+    rows = get_setup_master()
+    setups = []
+
+    for row in rows:
+        setup = str(
+            row.get("SetupName", row.get("Setup", ""))
+        ).strip()
+
+        active = str(
+            row.get("Active", "TRUE")
+        ).strip().upper()
+
+        if setup and active in ("TRUE", "YES", "1", "ACTIVE", ""):
+            setups.append(setup)
+
+    return sorted(set(setups))
+
+
+def start_production(part_name, material_grade, setup_name, cycle_time_text):
+    cycle_seconds = normalize_cycle_time(cycle_time_text)
+
+    now = timestamp_now()
+    run_id = (
+        "PR-"
+        + india_now().strftime("%Y%m%d%H%M%S%f")
+        + "-"
+        + str(st.session_state.machine_id)
+    )
+
+    worksheet = get_or_create_worksheet(
+        "ProductionLog",
+        [
+            "RunID",
+            "ShiftDate",
+            "ShiftID",
+            "MachineID",
+            "MachineSessionID",
+            "OperatorID",
+            "OperatorName",
+            "PartName",
+            "MaterialGrade",
+            "SetupName",
+            "CycleTimeText",
+            "CycleTimeSeconds",
+            "StartTime",
+            "EndTime",
+            "Status",
+            "CreatedAt",
+        ],
+    )
+
+    shift_id, shift_date = get_current_shift()
+
+    worksheet.append_row(
+        [
+            run_id,
+            shift_date,
+            shift_id,
+            st.session_state.machine_id,
+            st.session_state.session_id,
+            st.session_state.operator_id,
+            st.session_state.operator_name,
+            part_name,
+            material_grade,
+            setup_name,
+            cycle_time_text,
+            cycle_seconds,
+            now,
+            "",
+            "RUNNING",
+            now,
+        ],
+        value_input_option="USER_ENTERED",
+    )
+
+    refresh_data()
+
+    st.session_state.production_active = True
+    st.session_state.production_run_id = run_id
+    st.session_state.production_start_time = now
+    st.session_state.production_part = part_name
+    st.session_state.production_grade = material_grade
+    st.session_state.production_setup = setup_name
+    st.session_state.production_cycle_time = cycle_seconds
+    st.session_state.changeover_active = False
+    st.session_state.changeover_id = None
+    st.session_state.changeover_start_time = None
+
+
+def close_production_run():
+    run_id = st.session_state.get("production_run_id")
+
+    if not run_id:
+        return
+
+    spreadsheet = get_spreadsheet()
+    worksheet = spreadsheet.worksheet("ProductionLog")
+    rows = worksheet.get_all_values()
+
+    if not rows:
+        return
+
+    header = rows[0]
+
+    try:
+        run_col = header.index("RunID") + 1
+        end_col = header.index("EndTime") + 1
+        status_col = header.index("Status") + 1
+    except ValueError:
+        return
+
+    for row_number, row in enumerate(rows[1:], start=2):
+        if row and str(row[run_col - 1]).strip() == str(run_id):
+            worksheet.update_cell(
+                row_number,
+                end_col,
+                timestamp_now(),
+            )
+            worksheet.update_cell(
+                row_number,
+                status_col,
+                "CLOSED",
+            )
+            break
+
+    refresh_data()
+
+
+def start_changeover():
+    if not st.session_state.production_active:
+        st.warning("There is no active production run.")
+        return
+
+    close_production_run()
+
+    changeover_id = (
+        "CO-"
+        + india_now().strftime("%Y%m%d%H%M%S%f")
+    )
+
+    now = timestamp_now()
+
+    worksheet = get_or_create_worksheet(
+        "ChangeoverLog",
+        [
+            "ChangeoverID",
+            "ShiftDate",
+            "ShiftID",
+            "MachineID",
+            "MachineSessionID",
+            "OperatorID",
+            "OperatorName",
+            "PreviousPart",
+            "PreviousMaterialGrade",
+            "PreviousSetup",
+            "NewPart",
+            "NewMaterialGrade",
+            "NewSetup",
+            "StartTime",
+            "EndTime",
+            "DurationSeconds",
+            "Status",
+            "CreatedAt",
+        ],
+    )
+
+    shift_id, shift_date = get_current_shift()
+
+    worksheet.append_row(
+        [
+            changeover_id,
+            shift_date,
+            shift_id,
+            st.session_state.machine_id,
+            st.session_state.session_id,
+            st.session_state.operator_id,
+            st.session_state.operator_name,
+            st.session_state.production_part or "",
+            st.session_state.production_grade or "",
+            st.session_state.production_setup or "",
+            "",
+            "",
+            "",
+            now,
+            "",
+            "",
+            "OPEN",
+            now,
+        ],
+        value_input_option="USER_ENTERED",
+    )
+
+    st.session_state.production_active = False
+    st.session_state.production_run_id = None
+    st.session_state.changeover_active = True
+    st.session_state.changeover_id = changeover_id
+    st.session_state.changeover_start_time = now
+
+    refresh_data()
+
+
+def complete_changeover(
+    new_part,
+    new_grade,
+    new_setup,
+    cycle_time_text,
+):
+    if not st.session_state.changeover_active:
+        st.warning("No changeover is currently open.")
+        return
+
+    cycle_seconds = normalize_cycle_time(cycle_time_text)
+
+    now = timestamp_now()
+
+    spreadsheet = get_spreadsheet()
+    worksheet = spreadsheet.worksheet("ChangeoverLog")
+    rows = worksheet.get_all_values()
+
+    if not rows:
+        return
+
+    header = rows[0]
+
+    try:
+        id_col = header.index("ChangeoverID") + 1
+        new_part_col = header.index("NewPart") + 1
+        new_grade_col = header.index("NewMaterialGrade") + 1
+        new_setup_col = header.index("NewSetup") + 1
+        end_col = header.index("EndTime") + 1
+        duration_col = header.index("DurationSeconds") + 1
+        status_col = header.index("Status") + 1
+    except ValueError:
+        st.error("ChangeoverLog headers are incomplete.")
+        return
+
+    target_row = None
+    start_value = None
+
+    for row_number, row in enumerate(rows[1:], start=2):
+        if row and str(row[id_col - 1]).strip() == str(
+            st.session_state.changeover_id
+        ):
+            target_row = row_number
+            start_value = row[header.index("StartTime")]
+            break
+
+    if target_row is None:
+        st.error("Changeover record could not be found.")
+        return
+
+    try:
+        start_dt = datetime.strptime(
+            start_value,
+            "%Y-%m-%d %H:%M:%S",
+        ).replace(tzinfo=INDIA_TZ)
+
+        end_dt = datetime.strptime(
+            now,
+            "%Y-%m-%d %H:%M:%S",
+        ).replace(tzinfo=INDIA_TZ)
+
+        duration_seconds = int(
+            (end_dt - start_dt).total_seconds()
+        )
+    except Exception:
+        duration_seconds = ""
+
+    worksheet.update_cell(target_row, new_part_col, new_part)
+    worksheet.update_cell(target_row, new_grade_col, new_grade)
+    worksheet.update_cell(target_row, new_setup_col, new_setup)
+    worksheet.update_cell(target_row, end_col, now)
+    worksheet.update_cell(target_row, duration_col, duration_seconds)
+    worksheet.update_cell(target_row, status_col, "CLOSED")
+
+    refresh_data()
+
+    start_production(
+        new_part,
+        new_grade,
+        new_setup,
+        cycle_time_text,
+    )
+
+
+def production_entry():
+
+    st.title("🏭 Production Entry")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.info(
+            f"Operator: {st.session_state.operator_name}"
+        )
+
+    with col2:
+        st.info(
+            f"Machine: {st.session_state.machine_name}"
+        )
+
+    with col3:
+        st.info(
+            f"Shift: {st.session_state.current_shift}"
+        )
+
+    st.divider()
+
+    part_rows = get_part_options()
+
+    if not part_rows:
+        st.warning(
+            "No active PartMaster data found. "
+            "Add PartName and MaterialGrade to PartMaster."
+        )
+        return
+
+    part_names = sorted({
+        row["PartName"]
+        for row in part_rows
+        if row["PartName"]
+    })
+
+    setup_options = get_setup_options()
+
+    # =====================================================
+    # ACTIVE PRODUCTION
+    # =====================================================
+
+    if st.session_state.production_active:
+
+        st.success("🟢 PRODUCTION RUNNING")
+
+        c1, c2, c3 = st.columns(3)
+
+        with c1:
+            st.metric(
+                "Part",
+                st.session_state.production_part,
+            )
+
+        with c2:
+            st.metric(
+                "Material",
+                st.session_state.production_grade or "-",
+            )
+
+        with c3:
+            st.metric(
+                "Setup",
+                st.session_state.production_setup,
+            )
+
+        st.write(
+            f"Cycle Time: "
+            f"**{format_cycle_time(st.session_state.production_cycle_time)}**"
+        )
+
+        st.write(
+            f"Started: **{st.session_state.production_start_time}**"
+        )
+
+        st.divider()
+
+        if st.button(
+            "🔄 START CHANGEOVER",
+            type="primary",
+            use_container_width=True,
+        ):
+            start_changeover()
+            st.rerun()
+
+        return
+
+    # =====================================================
+    # CHANGEOVER IN PROGRESS
+    # =====================================================
+
+    if st.session_state.changeover_active:
+
+        st.warning("🟠 CHANGEOVER IN PROGRESS")
+
+        st.write(
+            f"Changeover started: "
+            f"**{st.session_state.changeover_start_time}**"
+        )
+
+        st.divider()
+
+        st.subheader("New Production")
+
+        selected_part = st.selectbox(
+            "Part Name",
+            part_names,
+            key="changeover_part",
+        )
+
+        grades = get_grade_options(selected_part)
+
+        if grades:
+            selected_grade = st.selectbox(
+                "Material Grade",
+                grades,
+                key="changeover_grade",
+            )
+        else:
+            st.warning(
+                "No material grade found for this part."
+            )
+            selected_grade = ""
+
+        if setup_options:
+            selected_setup = st.selectbox(
+                "Setup",
+                setup_options,
+                key="changeover_setup",
+            )
+        else:
+            st.warning(
+                "No Setup master data found."
+            )
+            selected_setup = ""
+
+        cycle_time = st.text_input(
+            "Cycle Time (MM.SS)",
+            placeholder="Example: 2.30",
+            key="changeover_cycle",
+        )
+
+        if st.button(
+            "▶ START NEW PRODUCTION",
+            type="primary",
+            use_container_width=True,
+        ):
+
+            if not selected_grade:
+                st.error("Select a material grade.")
+                return
+
+            if not selected_setup:
+                st.error("Select a setup.")
+                return
+
+            try:
+                complete_changeover(
+                    selected_part,
+                    selected_grade,
+                    selected_setup,
+                    cycle_time,
+                )
+                st.success("Changeover completed. Production started.")
+                st.rerun()
+
+            except ValueError as e:
+                st.error(str(e))
+            except Exception as e:
+                st.error("Unable to complete changeover.")
+                st.exception(e)
+
+        return
+
+    # =====================================================
+    # NEW PRODUCTION
+    # =====================================================
+
+    st.subheader("Start Production")
+
+    selected_part = st.selectbox(
+        "Part Name",
+        part_names,
+        key="production_part_select",
+    )
+
+    grades = get_grade_options(selected_part)
+
+    if grades:
+        selected_grade = st.selectbox(
+            "Material Grade",
+            grades,
+            key="production_grade_select",
+        )
+    else:
+        st.warning(
+            "No material grade found for this part."
+        )
+        selected_grade = ""
+
+    if setup_options:
+        selected_setup = st.selectbox(
+            "Setup",
+            setup_options,
+            key="production_setup_select",
+        )
+    else:
+        st.warning(
+            "No Setup master data found."
+        )
+        selected_setup = ""
+
+    cycle_time = st.text_input(
+        "Cycle Time (MM.SS)",
+        placeholder="Example: 2.30",
+        key="production_cycle_input",
+    )
+
+    if st.button(
+        "▶ START PRODUCTION",
+        type="primary",
+        use_container_width=True,
+    ):
+
+        if not selected_grade:
+            st.error("Select a material grade.")
+            return
+
+        if not selected_setup:
+            st.error("Select a setup.")
+            return
+
+        try:
+            start_production(
+                selected_part,
+                selected_grade,
+                selected_setup,
+                cycle_time,
+            )
+            st.success("Production started.")
+            st.rerun()
+
+        except ValueError as e:
+            st.error(str(e))
+        except Exception as e:
+            st.error("Unable to start production.")
+            st.exception(e)
 
 
 # =========================================================
@@ -943,14 +1355,9 @@ def machine_home():
     # TAKEOVER CONFIRMATION
     # =====================================================
 
-    if st.session_state.get(
-        "show_takeover",
-        False,
-    ):
+    if st.session_state.get("show_takeover", False):
 
-        active_session = st.session_state.get(
-            "occupied_session"
-        )
+        active_session = st.session_state.get("occupied_session")
 
         st.title("⚠️ Machine Already Occupied")
 
@@ -982,107 +1389,70 @@ def machine_home():
                 f"Current session started: **{login_time}**"
             )
 
-            st.write("")
-
             col1, col2 = st.columns(2)
 
             with col1:
-
                 if st.button(
                     "TAKE OVER MACHINE",
                     type="primary",
                     use_container_width=True,
                 ):
-
                     takeover_machine()
 
             with col2:
-
                 if st.button(
                     "CANCEL",
                     use_container_width=True,
                 ):
-
                     st.session_state.show_takeover = False
                     st.session_state.occupied_session = None
                     st.session_state.machine_selected = False
                     st.session_state.machine_id = None
                     st.session_state.machine_name = None
-
                     st.rerun()
 
         return
 
     # =====================================================
-    # NORMAL MACHINE HOME
+    # MACHINE HEADER
     # =====================================================
 
-    st.title(
-        "🏭 Manufacturing Production Monitor"
-    )
+    st.title("🏭 Manufacturing Production Monitor")
 
-    col1, col2 = st.columns([3, 1])
+    col1, col2, col3 = st.columns([2, 2, 1])
 
     with col1:
-
         st.success(
-            f"Operator: "
-            f"{st.session_state.operator_name}"
+            f"Operator: {st.session_state.operator_name}"
         )
 
+    with col2:
         st.info(
-            f"Machine: "
-            f"{st.session_state.machine_name}"
-        )
-
-    with col2:
-
-        if st.button(
-            "END MACHINE SESSION",
-            use_container_width=True,
-        ):
-
-            end_current_machine_session()
-
-    st.divider()
-
-    st.subheader(
-        "Current Machine Session"
-    )
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-
-        st.metric(
-            "Operator",
-            st.session_state.operator_name,
-        )
-
-    with col2:
-
-        st.metric(
-            "Machine",
-            st.session_state.machine_name,
+            f"Machine: {st.session_state.machine_name}"
         )
 
     with col3:
-
-        st.metric(
-            "Shift",
-            st.session_state.current_shift,
+        st.info(
+            f"Shift: {st.session_state.current_shift}"
         )
 
-    st.write("")
+    # =====================================================
+    # SESSION CONTROLS
+    # =====================================================
 
-    st.info(
-        f"Session ID: "
-        f"{st.session_state.session_id}"
-    )
+    if st.button(
+        "END MACHINE SESSION",
+        use_container_width=True,
+    ):
+        end_current_machine_session()
 
-    st.success(
-        "Machine is currently assigned to you."
-    )
+    st.divider()
+
+    # =====================================================
+    # PRODUCTION ENTRY
+    # =====================================================
+
+    production_entry()
 
 
 # =========================================================
