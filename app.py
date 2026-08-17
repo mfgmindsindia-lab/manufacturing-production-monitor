@@ -122,7 +122,6 @@ defaults = {
     "production_run_id": None,
     "production_start_time": None,
     "production_part": None,
-    "production_grade": None,
     "production_setup": None,
     "production_cycle_time": None,
     "changeover_active": False,
@@ -782,30 +781,42 @@ def get_part_options():
     options = []
 
     for row in rows:
+        part_code = str(row.get("PartCode", "")).strip()
         part = str(row.get("PartName", "")).strip()
-        grade = str(row.get("MaterialGrade", "")).strip()
         active = str(row.get("Active", "TRUE")).strip().upper()
 
         if part and active in ("TRUE", "YES", "1", "ACTIVE", ""):
             options.append({
+                "PartCode": part_code,
                 "PartName": part,
-                "MaterialGrade": grade,
             })
 
     return options
 
 
-def get_grade_options(part_name):
+def get_part_display_map():
+    """
+    Builds a lookup of:
+        "PartCode - PartName" -> {"PartCode": ..., "PartName": ...}
+
+    so the selectbox can be searched by either code or name.
+    Falls back to just PartName if PartCode is blank.
+    """
     rows = get_part_options()
+    display_map = {}
 
-    grades = sorted({
-        row["MaterialGrade"]
-        for row in rows
-        if row["PartName"] == part_name
-        and row["MaterialGrade"]
-    })
+    for row in rows:
+        part_code = row["PartCode"]
+        part_name = row["PartName"]
 
-    return grades
+        if part_code:
+            display_label = f"{part_code} - {part_name}"
+        else:
+            display_label = part_name
+
+        display_map[display_label] = row
+
+    return display_map
 
 
 def get_setup_options():
@@ -827,7 +838,7 @@ def get_setup_options():
     return sorted(set(setups))
 
 
-def start_production(part_name, material_grade, setup_name, cycle_time_text):
+def start_production(part_name, setup_name, cycle_time_text):
     cycle_seconds = normalize_cycle_time(cycle_time_text)
 
     now = timestamp_now()
@@ -849,7 +860,6 @@ def start_production(part_name, material_grade, setup_name, cycle_time_text):
             "OperatorID",
             "OperatorName",
             "PartName",
-            "MaterialGrade",
             "SetupName",
             "CycleTimeText",
             "CycleTimeSeconds",
@@ -872,7 +882,6 @@ def start_production(part_name, material_grade, setup_name, cycle_time_text):
             st.session_state.operator_id,
             st.session_state.operator_name,
             part_name,
-            material_grade,
             setup_name,
             cycle_time_text,
             cycle_seconds,
@@ -890,7 +899,6 @@ def start_production(part_name, material_grade, setup_name, cycle_time_text):
     st.session_state.production_run_id = run_id
     st.session_state.production_start_time = now
     st.session_state.production_part = part_name
-    st.session_state.production_grade = material_grade
     st.session_state.production_setup = setup_name
     st.session_state.production_cycle_time = cycle_seconds
     st.session_state.changeover_active = False
@@ -962,10 +970,8 @@ def start_changeover():
             "OperatorID",
             "OperatorName",
             "PreviousPart",
-            "PreviousMaterialGrade",
             "PreviousSetup",
             "NewPart",
-            "NewMaterialGrade",
             "NewSetup",
             "StartTime",
             "EndTime",
@@ -987,9 +993,7 @@ def start_changeover():
             st.session_state.operator_id,
             st.session_state.operator_name,
             st.session_state.production_part or "",
-            st.session_state.production_grade or "",
             st.session_state.production_setup or "",
-            "",
             "",
             "",
             now,
@@ -1012,7 +1016,6 @@ def start_changeover():
 
 def complete_changeover(
     new_part,
-    new_grade,
     new_setup,
     cycle_time_text,
 ):
@@ -1036,7 +1039,6 @@ def complete_changeover(
     try:
         id_col = header.index("ChangeoverID") + 1
         new_part_col = header.index("NewPart") + 1
-        new_grade_col = header.index("NewMaterialGrade") + 1
         new_setup_col = header.index("NewSetup") + 1
         end_col = header.index("EndTime") + 1
         duration_col = header.index("DurationSeconds") + 1
@@ -1078,7 +1080,6 @@ def complete_changeover(
         duration_seconds = ""
 
     worksheet.update_cell(target_row, new_part_col, new_part)
-    worksheet.update_cell(target_row, new_grade_col, new_grade)
     worksheet.update_cell(target_row, new_setup_col, new_setup)
     worksheet.update_cell(target_row, end_col, now)
     worksheet.update_cell(target_row, duration_col, duration_seconds)
@@ -1088,7 +1089,6 @@ def complete_changeover(
 
     start_production(
         new_part,
-        new_grade,
         new_setup,
         cycle_time_text,
     )
@@ -1117,20 +1117,16 @@ def production_entry():
 
     st.divider()
 
-    part_rows = get_part_options()
+    part_display_map = get_part_display_map()
 
-    if not part_rows:
+    if not part_display_map:
         st.warning(
             "No active PartMaster data found. "
-            "Add PartName and MaterialGrade to PartMaster."
+            "Add PartCode and PartName to PartMaster."
         )
         return
 
-    part_names = sorted({
-        row["PartName"]
-        for row in part_rows
-        if row["PartName"]
-    })
+    part_display_labels = sorted(part_display_map.keys())
 
     setup_options = get_setup_options()
 
@@ -1142,7 +1138,7 @@ def production_entry():
 
         st.success("🟢 PRODUCTION RUNNING")
 
-        c1, c2, c3 = st.columns(3)
+        c1, c2 = st.columns(2)
 
         with c1:
             st.metric(
@@ -1151,12 +1147,6 @@ def production_entry():
             )
 
         with c2:
-            st.metric(
-                "Material",
-                st.session_state.production_grade or "-",
-            )
-
-        with c3:
             st.metric(
                 "Setup",
                 st.session_state.production_setup,
@@ -1200,25 +1190,17 @@ def production_entry():
 
         st.subheader("New Production")
 
-        selected_part = st.selectbox(
-            "Part Name",
-            part_names,
+        selected_part_display = st.selectbox(
+            "Part (search by code or name)",
+            part_display_labels,
             key="changeover_part",
         )
 
-        grades = get_grade_options(selected_part)
-
-        if grades:
-            selected_grade = st.selectbox(
-                "Material Grade",
-                grades,
-                key="changeover_grade",
-            )
-        else:
-            st.warning(
-                "No material grade found for this part."
-            )
-            selected_grade = ""
+        selected_part = (
+            part_display_map[selected_part_display]["PartName"]
+            if selected_part_display
+            else ""
+        )
 
         if setup_options:
             selected_setup = st.selectbox(
@@ -1244,10 +1226,6 @@ def production_entry():
             use_container_width=True,
         ):
 
-            if not selected_grade:
-                st.error("Select a material grade.")
-                return
-
             if not selected_setup:
                 st.error("Select a setup.")
                 return
@@ -1255,7 +1233,6 @@ def production_entry():
             try:
                 complete_changeover(
                     selected_part,
-                    selected_grade,
                     selected_setup,
                     cycle_time,
                 )
@@ -1276,25 +1253,17 @@ def production_entry():
 
     st.subheader("Start Production")
 
-    selected_part = st.selectbox(
-        "Part Name",
-        part_names,
+    selected_part_display = st.selectbox(
+        "Part (search by code or name)",
+        part_display_labels,
         key="production_part_select",
     )
 
-    grades = get_grade_options(selected_part)
-
-    if grades:
-        selected_grade = st.selectbox(
-            "Material Grade",
-            grades,
-            key="production_grade_select",
-        )
-    else:
-        st.warning(
-            "No material grade found for this part."
-        )
-        selected_grade = ""
+    selected_part = (
+        part_display_map[selected_part_display]["PartName"]
+        if selected_part_display
+        else ""
+    )
 
     if setup_options:
         selected_setup = st.selectbox(
@@ -1320,10 +1289,6 @@ def production_entry():
         use_container_width=True,
     ):
 
-        if not selected_grade:
-            st.error("Select a material grade.")
-            return
-
         if not selected_setup:
             st.error("Select a setup.")
             return
@@ -1331,7 +1296,6 @@ def production_entry():
         try:
             start_production(
                 selected_part,
-                selected_grade,
                 selected_setup,
                 cycle_time,
             )
