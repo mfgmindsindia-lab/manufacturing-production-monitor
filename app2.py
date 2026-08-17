@@ -781,15 +781,42 @@ def get_part_options():
     options = []
 
     for row in rows:
+        part_code = str(row.get("PartCode", "")).strip()
         part = str(row.get("PartName", "")).strip()
         active = str(row.get("Active", "TRUE")).strip().upper()
 
         if part and active in ("TRUE", "YES", "1", "ACTIVE", ""):
             options.append({
+                "PartCode": part_code,
                 "PartName": part,
             })
 
     return options
+
+
+def get_part_display_map():
+    """
+    Builds a lookup of:
+        "PartCode - PartName" -> {"PartCode": ..., "PartName": ...}
+
+    so the selectbox can be searched by either code or name.
+    Falls back to just PartName if PartCode is blank.
+    """
+    rows = get_part_options()
+    display_map = {}
+
+    for row in rows:
+        part_code = row["PartCode"]
+        part_name = row["PartName"]
+
+        if part_code:
+            display_label = f"{part_code} - {part_name}"
+        else:
+            display_label = part_name
+
+        display_map[display_label] = row
+
+    return display_map
 
 
 def get_setup_options():
@@ -1090,20 +1117,16 @@ def production_entry():
 
     st.divider()
 
-    part_rows = get_part_options()
+    part_display_map = get_part_display_map()
 
-    if not part_rows:
+    if not part_display_map:
         st.warning(
             "No active PartMaster data found. "
-            "Add PartName to PartMaster."
+            "Add PartCode and PartName to PartMaster."
         )
         return
 
-    part_names = sorted({
-        row["PartName"]
-        for row in part_rows
-        if row["PartName"]
-    })
+    part_display_labels = sorted(part_display_map.keys())
 
     setup_options = get_setup_options()
 
@@ -1167,10 +1190,16 @@ def production_entry():
 
         st.subheader("New Production")
 
-        selected_part = st.selectbox(
-            "Part Name",
-            part_names,
+        selected_part_display = st.selectbox(
+            "Part (search by code or name)",
+            part_display_labels,
             key="changeover_part",
+        )
+
+        selected_part = (
+            part_display_map[selected_part_display]["PartName"]
+            if selected_part_display
+            else ""
         )
 
         if setup_options:
@@ -1224,10 +1253,16 @@ def production_entry():
 
     st.subheader("Start Production")
 
-    selected_part = st.selectbox(
-        "Part Name",
-        part_names,
+    selected_part_display = st.selectbox(
+        "Part (search by code or name)",
+        part_display_labels,
         key="production_part_select",
+    )
+
+    selected_part = (
+        part_display_map[selected_part_display]["PartName"]
+        if selected_part_display
+        else ""
     )
 
     if setup_options:
