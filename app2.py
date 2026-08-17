@@ -419,6 +419,47 @@ def end_current_machine_session():
 
 
 # =========================================================
+# BACK TO MACHINE LIST (without ending the machine session)
+# =========================================================
+
+def back_to_machine_list():
+    """
+    Returns the operator to the machine grid WITHOUT closing the
+    current machine's session in the sheet. This is what lets one
+    operator run multiple machines at once: the machine they were
+    just on stays ACTIVE and keeps producing/changing over in the
+    background, and they can go select or open another machine.
+    Reopening this machine later (via OPEN MACHINE) resumes exactly
+    where they left off, via sync_machine_production_state.
+    """
+
+    st.session_state.machine_selected = False
+    st.session_state.machine_id = None
+    st.session_state.machine_name = None
+    st.session_state.session_id = None
+    st.session_state.current_shift = None
+    st.session_state.shift_date = None
+    st.session_state.machine_session_active = False
+    st.session_state.show_takeover = False
+    st.session_state.occupied_session = None
+
+    st.session_state.production_active = False
+    st.session_state.production_run_id = None
+    st.session_state.production_part = None
+    st.session_state.production_setup = None
+    st.session_state.production_cycle_time = None
+    st.session_state.production_start_time = None
+
+    st.session_state.changeover_active = False
+    st.session_state.changeover_id = None
+    st.session_state.changeover_start_time = None
+
+    refresh_data()
+
+    st.rerun()
+
+
+# =========================================================
 # LOGOUT
 # =========================================================
 
@@ -683,6 +724,50 @@ def machine_selection():
             st.warning("No active machines found in Machines sheet.")
             return
 
+        # ---------------------------------------------------
+        # Attach each machine's active session (if any) and a
+        # sort priority so the operator's own machine(s) always
+        # float to the top - no hunting through the grid.
+        #   0 = my machine(s)
+        #   1 = available machines
+        #   2 = machines other operators are running
+        # ---------------------------------------------------
+
+        for machine in active_machines:
+            active_session = get_active_machine_session(
+                machine["MachineID"]
+            )
+            machine["active_session"] = active_session
+
+            if active_session is None:
+                machine["sort_priority"] = 1
+            else:
+                session_operator_id = str(
+                    active_session.get("OperatorID", "")
+                ).strip()
+
+                if session_operator_id == str(
+                    st.session_state.operator_id
+                ):
+                    machine["sort_priority"] = 0
+                else:
+                    machine["sort_priority"] = 2
+
+        active_machines.sort(
+            key=lambda m: (m["sort_priority"], m["MachineID"])
+        )
+
+        my_machine_count = sum(
+            1 for m in active_machines if m["sort_priority"] == 0
+        )
+
+        if my_machine_count > 0:
+            st.caption(
+                f"You currently have {my_machine_count} machine"
+                f"{'s' if my_machine_count != 1 else ''} open. "
+                f"Select another below to run more than one at a time."
+            )
+
         # Exactly three native Streamlit cards per row.
         for start in range(0, len(active_machines), 3):
             row_machines = active_machines[start:start + 3]
@@ -691,9 +776,9 @@ def machine_selection():
             for index, machine in enumerate(row_machines):
                 machine_id = machine["MachineID"]
                 machine_name = machine["MachineName"]
+                active_session = machine["active_session"]
 
                 with columns[index]:
-                    active_session = get_active_machine_session(machine_id)
 
                     if active_session is None:
                         with st.container(border=True):
@@ -1604,11 +1689,23 @@ def machine_home():
     # SESSION CONTROLS
     # =====================================================
 
-    if st.button(
-        "END MACHINE SESSION",
-        use_container_width=True,
-    ):
-        end_current_machine_session()
+    col_switch, col_end = st.columns(2)
+
+    with col_switch:
+        if st.button(
+            "🔀 SWITCH / ADD MACHINE",
+            use_container_width=True,
+            help="Keeps this machine running and takes you back "
+                 "to the machine list to open or select another one.",
+        ):
+            back_to_machine_list()
+
+    with col_end:
+        if st.button(
+            "END MACHINE SESSION",
+            use_container_width=True,
+        ):
+            end_current_machine_session()
 
     st.divider()
 
