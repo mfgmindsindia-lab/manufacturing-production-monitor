@@ -370,6 +370,10 @@ def takeover_machine():
     # Start new operator session
     create_machine_session()
 
+    # Resume any production/changeover already in progress on
+    # this machine, rather than resetting state for the new operator.
+    sync_machine_production_state(st.session_state.machine_id)
+
     st.session_state.show_takeover = False
     st.session_state.occupied_session = None
     st.session_state.machine_selected = True
@@ -707,6 +711,7 @@ def machine_selection():
                                 st.session_state.machine_id = machine_id
                                 st.session_state.machine_name = machine_name
                                 create_machine_session()
+                                sync_machine_production_state(machine_id)
                                 st.session_state.machine_selected = True
                                 st.rerun()
 
@@ -748,6 +753,7 @@ def machine_selection():
                                     st.session_state.current_shift = active_session.get("ShiftID")
                                     st.session_state.shift_date = active_session.get("Date")
                                     st.session_state.machine_session_active = True
+                                    sync_machine_production_state(machine_id)
                                     st.session_state.machine_selected = True
                                     st.rerun()
 
@@ -798,6 +804,114 @@ def get_or_create_worksheet(sheet_name, headers):
         worksheet.append_row(headers, value_input_option="USER_ENTERED")
 
     return worksheet
+
+
+def get_latest_running_production(machine_id):
+    """
+    Returns the most recent ProductionLog row for this machine
+    that is still RUNNING, regardless of which login session
+    started it. Used to restore state after a logout.
+    """
+    rows = safe_get_records("ProductionLog")
+
+    matches = [
+        r for r in rows
+        if str(r.get("MachineID", "")).strip() == str(machine_id)
+        and str(r.get("Status", "")).strip().upper() == "RUNNING"
+    ]
+
+    if not matches:
+        return None
+
+    matches.sort(key=lambda r: str(r.get("StartTime", "")))
+
+    return matches[-1]
+
+
+def get_latest_open_changeover(machine_id):
+    """
+    Returns the most recent ChangeoverLog row for this machine
+    that is still OPEN, regardless of which login session
+    started it. Used to restore state after a logout.
+    """
+    rows = safe_get_records("ChangeoverLog")
+
+    matches = [
+        r for r in rows
+        if str(r.get("MachineID", "")).strip() == str(machine_id)
+        and str(r.get("Status", "")).strip().upper() == "OPEN"
+    ]
+
+    if not matches:
+        return None
+
+    matches.sort(key=lambda r: str(r.get("StartTime", "")))
+
+    return matches[-1]
+
+
+def sync_machine_production_state(machine_id):
+    """
+    Restores production/changeover UI state from the sheet data
+    for this machine. This is essential because an operator may
+    log out mid-changeover (or mid-production) - the OPEN/RUNNING
+    row in the sheet stays exactly as it was, but st.session_state
+    is wiped on logout. Without this, reopening the machine would
+    incorrectly reset to "Start Production" instead of resuming
+    the changeover or production that was already in progress.
+    """
+
+    open_changeover = get_latest_open_changeover(machine_id)
+
+    if open_changeover:
+
+        st.session_state.changeover_active = True
+        st.session_state.changeover_id = open_changeover.get("ChangeoverID")
+        st.session_state.changeover_start_time = open_changeover.get("StartTime")
+
+        st.session_state.production_active = False
+        st.session_state.production_run_id = None
+        st.session_state.production_part = None
+        st.session_state.production_setup = None
+        st.session_state.production_cycle_time = None
+        st.session_state.production_start_time = None
+
+        return
+
+    running_production = get_latest_running_production(machine_id)
+
+    if running_production:
+
+        st.session_state.production_active = True
+        st.session_state.production_run_id = running_production.get("RunID")
+        st.session_state.production_start_time = running_production.get("StartTime")
+        st.session_state.production_part = running_production.get("PartName")
+        st.session_state.production_setup = running_production.get("SetupName")
+
+        cycle_seconds = running_production.get("CycleTimeSeconds")
+
+        try:
+            st.session_state.production_cycle_time = int(cycle_seconds)
+        except (TypeError, ValueError):
+            st.session_state.production_cycle_time = None
+
+        st.session_state.changeover_active = False
+        st.session_state.changeover_id = None
+        st.session_state.changeover_start_time = None
+
+        return
+
+    # Nothing in progress on this machine - clean slate.
+    st.session_state.production_active = False
+    st.session_state.production_run_id = None
+    st.session_state.production_part = None
+    st.session_state.production_setup = None
+    st.session_state.production_cycle_time = None
+    st.session_state.production_start_time = None
+
+    st.session_state.changeover_active = False
+    st.session_state.changeover_id = None
+    st.session_state.changeover_start_time = None
 
 
 def normalize_cycle_time(value):
