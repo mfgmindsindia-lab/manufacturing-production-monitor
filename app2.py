@@ -1,5 +1,7 @@
 import streamlit as st
 import gspread
+import pandas as pd
+import plotly.express as px
 from google.oauth2.service_account import Credentials
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -68,6 +70,18 @@ def refresh_data():
     get_records.clear()
 
 
+def safe_get_records(sheet_name):
+    """
+    Like get_records, but returns an empty list instead of raising
+    if the worksheet doesn't exist yet (e.g. ProductionLog/ChangeoverLog
+    before any production has ever been logged).
+    """
+    try:
+        return get_records(sheet_name)
+    except Exception:
+        return []
+
+
 # =========================================================
 # SHIFT CALCULATION
 # =========================================================
@@ -107,6 +121,7 @@ def get_current_shift():
 
 defaults = {
     "logged_in": False,
+    "manager_logged_in": False,
     "operator_id": None,
     "operator_name": None,
     "machine_selected": False,
@@ -420,6 +435,15 @@ def logout():
 
 
 # =========================================================
+# MANAGER LOGOUT
+# =========================================================
+
+def manager_logout():
+    st.session_state.clear()
+    st.rerun()
+
+
+# =========================================================
 # LOGIN SCREEN
 # =========================================================
 
@@ -428,6 +452,19 @@ def login_screen():
     st.title(
         "🏭 Manufacturing Production Monitor"
     )
+
+    tab_operator, tab_manager = st.tabs(
+        ["Operator Login", "Manager Login"]
+    )
+
+    with tab_operator:
+        operator_login_tab()
+
+    with tab_manager:
+        manager_login_tab()
+
+
+def operator_login_tab():
 
     st.subheader("Operator Login")
 
@@ -557,6 +594,55 @@ def login_screen():
         )
 
         st.exception(e)
+
+
+def manager_login_tab():
+
+    st.subheader("Manager Login")
+
+    st.write("")
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+
+    with col2:
+
+        manager_password = st.text_input(
+            "Manager Password",
+            type="password",
+            placeholder="Enter manager password",
+            key="manager_password_input",
+        )
+
+        st.write("")
+
+        manager_login_button = st.button(
+            "MANAGER LOGIN",
+            type="primary",
+            use_container_width=True,
+        )
+
+        if manager_login_button:
+
+            configured_password = str(
+                st.secrets.get("manager_password", "")
+            ).strip()
+
+            if not configured_password:
+
+                st.error(
+                    "Manager password is not configured. "
+                    "Add manager_password to st.secrets."
+                )
+                return
+
+            if manager_password.strip() == configured_password:
+
+                st.session_state.manager_logged_in = True
+                st.rerun()
+
+            else:
+
+                st.error("Invalid manager password.")
 
 
 # =========================================================
@@ -1420,10 +1506,414 @@ def machine_home():
 
 
 # =========================================================
+# MANAGER DASHBOARD - DATA HELPERS
+# =========================================================
+
+SHIFT_LENGTH_MINUTES = 690  # 08:30 to 20:00 (and the mirrored night shift)
+
+
+def get_machine_live_status():
+    machines = safe_get_records("Machines")
+    production_rows = safe_get_records("ProductionLog")
+    changeover_rows = safe_get_records("ChangeoverLog")
+
+    status_rows = []
+
+    for machine in machines:
+
+        machine_id = str(machine.get("MachineID", "")).strip()
+        machine_name = str(machine.get("MachineName", "")).strip()
+        active = str(machine.get("Active", "")).strip().upper()
+
+        if not machine_id or not machine_name or active != "TRUE":
+            continue
+
+        session = get_active_machine_session(machine_id)
+
+        if session is None:
+            status_rows.append({
+                "MachineID": machine_id,
+                "MachineName": machine_name,
+                "Status": "IDLE",
+                "Operator": "",
+                "Detail": "No operator logged in",
+            })
+            continue
+
+        operator = str(session.get("OperatorName", "")).strip()
+        session_id = str(session.get("SessionID", "")).strip()
+
+        running_row = next(
+            (
+                r for r in production_rows
+                if str(r.get("MachineSessionID", "")).strip() == session_id
+                and str(r.get("Status", "")).strip().upper() == "RUNNING"
+            ),
+            None,
+        )
+
+        open_changeover = next(
+            (
+                r for r in changeover_rows
+                if str(r.get("MachineSessionID", "")).strip() == session_id
+                and str(r.get("Status", "")).strip().upper() == "OPEN"
+            ),
+            None,
+        )
+
+        if running_row:
+            status = "RUNNING"
+            detail = str(running_row.get("PartName", ""))
+        elif open_changeover:
+            status = "CHANGEOVER"
+            detail = "In progress"
+        else:
+            status = "LOGGED IN"
+            detail = "No active production"
+
+        status_rows.append({
+            "MachineID": machine_id,
+            "MachineName": machine_name,
+            "Status": status,
+            "Operator": operator,
+            "Detail": detail,
+        })
+
+    return status_rows
+
+
+def get_production_dataframe():
+    rows = safe_get_records("ProductionLog")
+
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+
+    if "StartTime" in df.columns:
+        df["StartTime"] = pd.to_datetime(
+            df["StartTime"], errors="coerce"
+        )
+
+    if "EndTime" in df.columns:
+        df["EndTime"] = pd.to_datetime(
+            df["EndTime"], errors="coerce"
+        )
+
+    return df
+
+
+def get_changeover_dataframe():
+    rows = safe_get_records("ChangeoverLog")
+
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+
+    if "StartTime" in df.columns:
+        df["StartTime"] = pd.to_datetime(
+            df["StartTime"], errors="coerce"
+        )
+
+    if "EndTime" in df.columns:
+        df["EndTime"] = pd.to_datetime(
+            df["EndTime"], errors="coerce"
+        )
+
+    if "DurationSeconds" in df.columns:
+        df["DurationMinutes"] = pd.to_numeric(
+            df["DurationSeconds"], errors="coerce"
+        ) / 60
+
+    return df
+
+
+# =========================================================
+# MANAGER DASHBOARD - TABS
+# =========================================================
+
+def manager_live_status_tab():
+
+    status_rows = get_machine_live_status()
+
+    if not status_rows:
+        st.info("No active machines found.")
+        return
+
+    running = sum(1 for r in status_rows if r["Status"] == "RUNNING")
+    changeover = sum(1 for r in status_rows if r["Status"] == "CHANGEOVER")
+    idle = sum(1 for r in status_rows if r["Status"] == "IDLE")
+    logged_in = sum(1 for r in status_rows if r["Status"] == "LOGGED IN")
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Running", running)
+    m2.metric("Changeover", changeover)
+    m3.metric("Logged In (Idle)", logged_in)
+    m4.metric("Idle (No Login)", idle)
+
+    st.divider()
+
+    for start in range(0, len(status_rows), 3):
+        row_machines = status_rows[start:start + 3]
+        columns = st.columns(3)
+
+        for index, machine in enumerate(row_machines):
+            with columns[index]:
+                with st.container(border=True):
+                    st.subheader(machine["MachineID"])
+                    st.write(machine["MachineName"])
+
+                    if machine["Status"] == "RUNNING":
+                        st.success(f"🟢 RUNNING — {machine['Detail']}")
+                    elif machine["Status"] == "CHANGEOVER":
+                        st.warning("🟠 CHANGEOVER")
+                    elif machine["Status"] == "LOGGED IN":
+                        st.info("🔵 LOGGED IN — idle")
+                    else:
+                        st.error("⚪ IDLE — no operator")
+
+                    if machine["Operator"]:
+                        st.caption(f"👤 {machine['Operator']}")
+
+
+def manager_production_tab():
+
+    df = get_production_dataframe()
+
+    if df.empty:
+        st.info("No production data logged yet.")
+        return
+
+    date_filter = st.date_input(
+        "Shift Date",
+        value=india_now().date(),
+        key="mgr_production_date",
+    )
+
+    filtered = df[df["ShiftDate"] == str(date_filter)]
+
+    if filtered.empty:
+        st.info("No production runs on this date.")
+        return
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Total Runs", len(filtered))
+    m2.metric("Machines Used", filtered["MachineID"].nunique())
+    m3.metric("Parts Produced", filtered["PartName"].nunique())
+
+    st.divider()
+
+    runs_by_machine = (
+        filtered.groupby("MachineID")
+        .size()
+        .reset_index(name="Runs")
+    )
+
+    fig = px.bar(
+        runs_by_machine,
+        x="MachineID",
+        y="Runs",
+        title="Production Runs by Machine",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.dataframe(
+        filtered[[
+            "MachineID", "OperatorName", "PartName",
+            "SetupName", "CycleTimeText", "StartTime",
+            "EndTime", "Status",
+        ]],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+def manager_changeover_tab():
+
+    df = get_changeover_dataframe()
+
+    if df.empty:
+        st.info("No changeover data logged yet.")
+        return
+
+    date_filter = st.date_input(
+        "Shift Date",
+        value=india_now().date(),
+        key="mgr_changeover_date",
+    )
+
+    filtered = df[df["ShiftDate"] == str(date_filter)]
+
+    if filtered.empty:
+        st.info("No changeovers on this date.")
+        return
+
+    closed = filtered[filtered["Status"] == "CLOSED"]
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Total Changeovers", len(filtered))
+
+    if not closed.empty and "DurationMinutes" in closed.columns:
+        m2.metric(
+            "Avg Duration (min)",
+            f"{closed['DurationMinutes'].mean():.1f}",
+        )
+        m3.metric(
+            "Longest (min)",
+            f"{closed['DurationMinutes'].max():.1f}",
+        )
+    else:
+        m2.metric("Avg Duration (min)", "-")
+        m3.metric("Longest (min)", "-")
+
+    st.divider()
+
+    if not closed.empty and "DurationMinutes" in closed.columns:
+        fig = px.bar(
+            closed,
+            x="MachineID",
+            y="DurationMinutes",
+            title="Changeover Duration by Machine (minutes)",
+            hover_data=["PreviousPart", "NewPart"],
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.dataframe(
+        filtered[[
+            "MachineID", "OperatorName", "PreviousPart",
+            "NewPart", "StartTime", "EndTime", "Status",
+        ]],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+def manager_utilization_tab():
+
+    df = get_production_dataframe()
+
+    if df.empty:
+        st.info("No production data logged yet.")
+        return
+
+    date_filter = st.date_input(
+        "Shift Date",
+        value=india_now().date(),
+        key="mgr_utilization_date",
+    )
+
+    filtered = df[df["ShiftDate"] == str(date_filter)].copy()
+
+    if filtered.empty:
+        st.info("No production runs on this date.")
+        return
+
+    now = india_now().replace(tzinfo=None)
+
+    def run_duration_minutes(row):
+        start = row["StartTime"]
+        end = row["EndTime"]
+
+        if pd.isna(start):
+            return 0
+
+        if pd.isna(end):
+            end = now
+
+        return max((end - start).total_seconds() / 60, 0)
+
+    filtered["RunMinutes"] = filtered.apply(
+        run_duration_minutes, axis=1
+    )
+
+    utilization = (
+        filtered.groupby("MachineID")["RunMinutes"]
+        .sum()
+        .reset_index()
+    )
+
+    utilization["UtilizationPct"] = (
+        utilization["RunMinutes"] / SHIFT_LENGTH_MINUTES * 100
+    ).clip(upper=100)
+
+    fig = px.bar(
+        utilization,
+        x="MachineID",
+        y="UtilizationPct",
+        title="Machine Utilization % (Production Time vs Shift Length)",
+        range_y=[0, 100],
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.caption(
+        f"Utilization = total production run time ÷ "
+        f"{SHIFT_LENGTH_MINUTES} min shift length. "
+        f"Changeover and idle time are not counted as production."
+    )
+
+    st.dataframe(
+        utilization.rename(columns={
+            "RunMinutes": "Production Minutes",
+            "UtilizationPct": "Utilization %",
+        }),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+def manager_dashboard():
+
+    col1, col2 = st.columns([5, 1])
+
+    with col1:
+        st.title("📊 Manager KPI Dashboard")
+
+    with col2:
+        st.write("")
+        if st.button("Logout", use_container_width=True):
+            manager_logout()
+
+    if st.button("🔄 Refresh Data"):
+        refresh_data()
+        st.rerun()
+
+    st.caption(
+        f"Live as of {timestamp_now()} IST "
+        f"(data auto-refreshes every 15 seconds)"
+    )
+
+    tab_live, tab_production, tab_changeover, tab_utilization = st.tabs(
+        [
+            "Live Status",
+            "Production",
+            "Changeover",
+            "Utilization",
+        ]
+    )
+
+    with tab_live:
+        manager_live_status_tab()
+
+    with tab_production:
+        manager_production_tab()
+
+    with tab_changeover:
+        manager_changeover_tab()
+
+    with tab_utilization:
+        manager_utilization_tab()
+
+
+# =========================================================
 # MAIN APPLICATION
 # =========================================================
 
-if not st.session_state.logged_in:
+if st.session_state.manager_logged_in:
+
+    manager_dashboard()
+
+elif not st.session_state.logged_in:
 
     login_screen()
 
