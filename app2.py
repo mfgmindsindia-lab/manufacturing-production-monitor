@@ -1148,6 +1148,30 @@ def get_part_display_map():
     return display_map
 
 
+MAX_PART_DROPDOWN_RESULTS = 50
+
+
+def filter_part_labels(all_labels, query, max_results=MAX_PART_DROPDOWN_RESULTS):
+    """
+    Cuts the dropdown down to a short list instead of handing the
+    browser every part at once - rendering hundreds/thousands of
+    options in a single selectbox is what makes it hang. With no
+    search text yet, just show the first page; once the operator
+    types, filter by substring match on the "code - name" label.
+    """
+    if not query or not query.strip():
+        return all_labels[:max_results]
+
+    query_lower = query.strip().lower()
+
+    matches = [
+        label for label in all_labels
+        if query_lower in label.lower()
+    ]
+
+    return matches[:max_results]
+
+
 def get_setup_options():
     rows = get_setup_master()
     setups = []
@@ -1519,13 +1543,33 @@ def production_entry():
 
         st.subheader("New Production")
 
+        part_search_co = st.text_input(
+            "🔍 Search part (type code or name)",
+            placeholder="Start typing to filter the list...",
+            key="changeover_part_search",
+        )
+
+        filtered_labels_co = filter_part_labels(
+            part_display_labels, part_search_co
+        )
+
+        if (
+            len(part_display_labels) > MAX_PART_DROPDOWN_RESULTS
+            and len(filtered_labels_co) >= MAX_PART_DROPDOWN_RESULTS
+        ):
+            st.caption(
+                f"Showing first {MAX_PART_DROPDOWN_RESULTS} matches "
+                f"of {len(part_display_labels)} parts — keep typing "
+                f"to narrow it down."
+            )
+
         with st.form("changeover_new_production_form"):
 
             selected_part_display = st.selectbox(
-                "Part (search by code or name)",
-                part_display_labels,
+                "Part",
+                filtered_labels_co,
                 index=None,
-                placeholder="Search by part code or name",
+                placeholder="Select from the filtered results above",
                 key="changeover_part",
             )
 
@@ -1592,13 +1636,33 @@ def production_entry():
 
     st.subheader("Start Production")
 
+    part_search_new = st.text_input(
+        "🔍 Search part (type code or name)",
+        placeholder="Start typing to filter the list...",
+        key="production_part_search",
+    )
+
+    filtered_labels_new = filter_part_labels(
+        part_display_labels, part_search_new
+    )
+
+    if (
+        len(part_display_labels) > MAX_PART_DROPDOWN_RESULTS
+        and len(filtered_labels_new) >= MAX_PART_DROPDOWN_RESULTS
+    ):
+        st.caption(
+            f"Showing first {MAX_PART_DROPDOWN_RESULTS} matches "
+            f"of {len(part_display_labels)} parts — keep typing "
+            f"to narrow it down."
+        )
+
     with st.form("new_production_form"):
 
         selected_part_display = st.selectbox(
-            "Part (search by code or name)",
-            part_display_labels,
+            "Part",
+            filtered_labels_new,
             index=None,
-            placeholder="Search by part code or name",
+            placeholder="Select from the filtered results above",
             key="production_part_select",
         )
 
