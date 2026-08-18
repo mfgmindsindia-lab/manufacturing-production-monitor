@@ -1524,6 +1524,8 @@ def production_entry():
             selected_part_display = st.selectbox(
                 "Part (search by code or name)",
                 part_display_labels,
+                index=None,
+                placeholder="Search by part code or name",
                 key="changeover_part",
             )
 
@@ -1559,6 +1561,10 @@ def production_entry():
                 else ""
             )
 
+            if not selected_part:
+                st.error("Select a part.")
+                return
+
             if not selected_setup:
                 st.error("Select a setup.")
                 return
@@ -1591,6 +1597,8 @@ def production_entry():
         selected_part_display = st.selectbox(
             "Part (search by code or name)",
             part_display_labels,
+            index=None,
+            placeholder="Search by part code or name",
             key="production_part_select",
         )
 
@@ -1625,6 +1633,10 @@ def production_entry():
             if selected_part_display
             else ""
         )
+
+        if not selected_part:
+            st.error("Select a part.")
+            return
 
         if not selected_setup:
             st.error("Select a setup.")
