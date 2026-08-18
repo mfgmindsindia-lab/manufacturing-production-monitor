@@ -66,8 +66,22 @@ def get_records(sheet_name):
     return worksheet.get_all_records()
 
 
+@st.cache_data(ttl=180)
+def get_master_records(sheet_name):
+    """
+    Same as get_records, but for reference data that changes rarely
+    (PartMaster, Setup) - a longer TTL means far fewer Google Sheets
+    API round trips per operator session, which is what was making
+    selecting a part feel slow on every rerun.
+    """
+    spreadsheet = get_spreadsheet()
+    worksheet = spreadsheet.worksheet(sheet_name)
+    return worksheet.get_all_records()
+
+
 def refresh_data():
     get_records.clear()
+    get_master_records.clear()
 
 
 def safe_get_records(sheet_name):
@@ -463,16 +477,35 @@ def back_to_machine_list():
 # LOGOUT
 # =========================================================
 
+def close_all_operator_sessions(operator_id):
+    """
+    Closes every ACTIVE machine session belonging to this operator -
+    not just the one currently open in this browser tab. Needed
+    because an operator can now hold multiple machines at once via
+    SWITCH / ADD MACHINE, so a plain logout must sweep all of them.
+    """
+    sessions = get_records("MachineSessions")
+
+    for session in sessions:
+        session_operator_id = str(
+            session.get("OperatorID", "")
+        ).strip()
+
+        status = str(
+            session.get("Status", "")
+        ).strip().upper()
+
+        if (
+            session_operator_id == str(operator_id)
+            and status == "ACTIVE"
+        ):
+            close_machine_session(session)
+
+
 def logout():
 
-    if st.session_state.machine_session_active:
-
-        active_session = get_active_machine_session(
-            st.session_state.machine_id
-        )
-
-        if active_session:
-            close_machine_session(active_session)
+    if st.session_state.get("operator_id"):
+        close_all_operator_sessions(st.session_state.operator_id)
 
     st.session_state.clear()
 
@@ -698,10 +731,21 @@ def machine_selection():
 
     st.title("🏭 Machine Status")
 
-    st.success(
-        f"👤 {st.session_state.operator_name} "
-        f"({st.session_state.operator_id})"
-    )
+    col_op, col_logout = st.columns([4, 1])
+
+    with col_op:
+        st.success(
+            f"👤 {st.session_state.operator_name} "
+            f"({st.session_state.operator_id})"
+        )
+
+    with col_logout:
+        if st.button(
+            "🚪 LOGOUT",
+            use_container_width=True,
+            help="Ends any machine sessions you have open and logs you out.",
+        ):
+            logout()
 
     st.divider()
 
@@ -1049,14 +1093,14 @@ def format_cycle_time(seconds):
 
 def get_part_master():
     try:
-        return get_records("PartMaster")
+        return get_master_records("PartMaster")
     except Exception:
         return []
 
 
 def get_setup_master():
     try:
-        return get_records("Setup")
+        return get_master_records("Setup")
     except Exception:
         return []
 
@@ -1475,41 +1519,45 @@ def production_entry():
 
         st.subheader("New Production")
 
-        selected_part_display = st.selectbox(
-            "Part (search by code or name)",
-            part_display_labels,
-            key="changeover_part",
-        )
+        with st.form("changeover_new_production_form"):
 
-        selected_part = (
-            part_display_map[selected_part_display]["PartName"]
-            if selected_part_display
-            else ""
-        )
-
-        if setup_options:
-            selected_setup = st.selectbox(
-                "Setup",
-                setup_options,
-                key="changeover_setup",
+            selected_part_display = st.selectbox(
+                "Part (search by code or name)",
+                part_display_labels,
+                key="changeover_part",
             )
-        else:
-            st.warning(
-                "No Setup master data found."
+
+            if setup_options:
+                selected_setup = st.selectbox(
+                    "Setup",
+                    setup_options,
+                    key="changeover_setup",
+                )
+            else:
+                st.warning(
+                    "No Setup master data found."
+                )
+                selected_setup = ""
+
+            cycle_time = st.text_input(
+                "Cycle Time (MM.SS)",
+                placeholder="Example: 2.30",
+                key="changeover_cycle",
             )
-            selected_setup = ""
 
-        cycle_time = st.text_input(
-            "Cycle Time (MM.SS)",
-            placeholder="Example: 2.30",
-            key="changeover_cycle",
-        )
+            submitted = st.form_submit_button(
+                "▶ START NEW PRODUCTION",
+                type="primary",
+                use_container_width=True,
+            )
 
-        if st.button(
-            "▶ START NEW PRODUCTION",
-            type="primary",
-            use_container_width=True,
-        ):
+        if submitted:
+
+            selected_part = (
+                part_display_map[selected_part_display]["PartName"]
+                if selected_part_display
+                else ""
+            )
 
             if not selected_setup:
                 st.error("Select a setup.")
@@ -1538,41 +1586,45 @@ def production_entry():
 
     st.subheader("Start Production")
 
-    selected_part_display = st.selectbox(
-        "Part (search by code or name)",
-        part_display_labels,
-        key="production_part_select",
-    )
+    with st.form("new_production_form"):
 
-    selected_part = (
-        part_display_map[selected_part_display]["PartName"]
-        if selected_part_display
-        else ""
-    )
-
-    if setup_options:
-        selected_setup = st.selectbox(
-            "Setup",
-            setup_options,
-            key="production_setup_select",
+        selected_part_display = st.selectbox(
+            "Part (search by code or name)",
+            part_display_labels,
+            key="production_part_select",
         )
-    else:
-        st.warning(
-            "No Setup master data found."
+
+        if setup_options:
+            selected_setup = st.selectbox(
+                "Setup",
+                setup_options,
+                key="production_setup_select",
+            )
+        else:
+            st.warning(
+                "No Setup master data found."
+            )
+            selected_setup = ""
+
+        cycle_time = st.text_input(
+            "Cycle Time (MM.SS)",
+            placeholder="Example: 2.30",
+            key="production_cycle_input",
         )
-        selected_setup = ""
 
-    cycle_time = st.text_input(
-        "Cycle Time (MM.SS)",
-        placeholder="Example: 2.30",
-        key="production_cycle_input",
-    )
+        submitted = st.form_submit_button(
+            "▶ START PRODUCTION",
+            type="primary",
+            use_container_width=True,
+        )
 
-    if st.button(
-        "▶ START PRODUCTION",
-        type="primary",
-        use_container_width=True,
-    ):
+    if submitted:
+
+        selected_part = (
+            part_display_map[selected_part_display]["PartName"]
+            if selected_part_display
+            else ""
+        )
 
         if not selected_setup:
             st.error("Select a setup.")
@@ -1689,7 +1741,7 @@ def machine_home():
     # SESSION CONTROLS
     # =====================================================
 
-    col_switch, col_end = st.columns(2)
+    col_switch, col_end, col_logout = st.columns(3)
 
     with col_switch:
         if st.button(
@@ -1706,6 +1758,14 @@ def machine_home():
             use_container_width=True,
         ):
             end_current_machine_session()
+
+    with col_logout:
+        if st.button(
+            "🚪 LOGOUT",
+            use_container_width=True,
+            help="Ends ALL your active machine sessions and logs you out.",
+        ):
+            logout()
 
     st.divider()
 
